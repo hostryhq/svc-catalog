@@ -312,6 +312,12 @@ func opEvents(t *testing.T, mk Factory) {
 	if got := itemNames(t, svc, As(t, tenant)); len(got) != 0 {
 		t.Fatalf("a refused event must not apply anything: %v", got)
 	}
+	for _, typ := range []string{"sync.op.flagged", "sync.quarantine.recorded", "sync.pii.erased"} { // gateway events are not ops: acked, ignored
+		gw := events.Envelope{ID: ids.New(), Type: typ, V: 1, Source: "sync", TenantID: tenant, Key: "k", OccurredAt: seed.At, Data: json.RawMessage(`{}`)}
+		if err := svc.ApplyEventTx(ctxBg, gw); err != nil {
+			t.Fatalf("gateway event %s must not block the consumer: %v", typ, err)
+		}
+	}
 	flagged := edit(t, good, func(d map[string]any) { d["status"] = "flagged"; d["marks"] = []string{"unsealed"} })
 	for _, ev := range []events.Envelope{flagged, good} { // a flagged op is applied; the same op again is a no-op
 		if err := svc.ApplyEventTx(ctxBg, ev); err != nil {

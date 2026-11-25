@@ -191,7 +191,11 @@ func TestConsumerThroughTheInbox(t *testing.T) {
 	bodyless, _ := json.Marshal(events.Envelope{ID: ids.New(), Type: "sync.op.stored", V: 1, Source: "sync", TenantID: w.Org(), Key: "k", OccurredAt: seed.At,
 		Data: json.RawMessage(`{"origin":"d","stream":"brand:` + w.Brand().String() + `","seq":1,"status":"accepted","intent":"menu.item.edit"}`)})
 	dl := &delivery{data: bodyless}
-	if err := sub.Process(ctx, dl); err != nil || !dl.naked || dl.acked {
-		t.Fatalf("an op event without a body must be retried, not acknowledged: err %v naked %v acked %v", err, dl.naked, dl.acked)
+	if err := sub.Process(ctx, dl); err != nil || dl.naked || !dl.acked {
+		t.Fatalf("an op event without a body is a permanent error: parked and acknowledged at once: err %v naked %v acked %v", err, dl.naked, dl.acked)
+	}
+	var parked int
+	if err := db.Admin.QueryRowContext(ctx, `SELECT count(*) FROM event_parked`).Scan(&parked); err != nil || parked != 1 {
+		t.Fatalf("parked events: %d %v", parked, err)
 	}
 }

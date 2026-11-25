@@ -30,16 +30,17 @@ const serviceName = "catalog"
 
 // ApplyEvent applies one bus event inside tx (the tenant context of ctx is the event's tenant, and tx is bound
 // to it). A sync op event is read only through go-common/sync.ParseOp (verification, size limits, upcasters);
-// a malformed one is an error, so the inbox retries and then parks it. Applying is idempotent and needs no
+// a malformed one is a permanent error (inbox.ErrPermanent), so the inbox parks it at once. Applying is idempotent and needs no
 // order (ADR-0014 A2.1 item 5).
 func (s *Service) ApplyEvent(ctx context.Context, tx repository.Tx, env events.Envelope) error {
-	switch {
-	case strings.HasPrefix(env.Type, "sync.op."):
+	if _, ok := gsync.OpNamespace(env.Type); ok {
 		op, err := s.parser.ParseEnvelope(env)
 		if err != nil {
 			return err
 		}
 		return s.ApplyOp(ctx, tx, op)
+	}
+	switch {
 	case env.Type == EventOutletCreated || env.Type == EventOutletUpdated:
 		var d struct {
 			OutletID ids.ID `json:"outlet_id"`
@@ -58,7 +59,7 @@ func (s *Service) ApplyEvent(ctx context.Context, tx repository.Tx, env events.E
 		}
 		return tx.UpsertOutlet(ctx, model.OutletRef{ID: d.OutletID, BrandID: d.BrandID, Kind: d.Kind, Status: d.Status})
 	}
-	return nil // not ours: consumers ignore what they do not know
+	return nil // not ours (gateway events such as sync.op.flagged included): acked and ignored
 }
 
 // ApplyEventTx runs ApplyEvent in a transaction of its own for the event's tenant (the double and tests; the
