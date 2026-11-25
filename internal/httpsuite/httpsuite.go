@@ -30,8 +30,12 @@ type Target struct {
 	*double.Tokens
 	// Load stores an organisation's named example world.
 	Load func(t testing.TB, w seed.World, world string)
-	// Emitted returns the ops catalog asked the gateway to record, in order.
+	// Emitted returns the ops the gateway stored, in order.
 	Emitted func() []double.Emitted
+	// SetGatewayDown makes the sync gateway unreachable or reachable again; Settle then runs the emit worker and
+	// delivers what the gateway stored, as the process's worker and the bus do.
+	SetGatewayDown func(down bool)
+	Settle         func(t testing.TB)
 	// EventTypes returns the types of the events in the tenant's outbox, in order.
 	EventTypes func(t testing.TB, tenant ids.ID) []string
 	// AuditActions returns the audit_log actions of the tenant, in order.
@@ -93,7 +97,7 @@ func outletHeader(base http.Header, outlet ids.ID) http.Header {
 func Isolation(t *testing.T, mk Factory) {
 	g := mk(t)
 	a, b := seed.Example, seed.Other
-	g.Load(t, a, seed.ImportPreviewed)
+	g.Load(t, a, seed.BaseWithImport)
 	g.Load(t, b, seed.Base)
 	ownerB := g.Owner(b.Org())
 	ownerA := g.Owner(a.Org())
@@ -224,7 +228,7 @@ func encodeCursor(id string) string {
 func Authorization(t *testing.T, mk Factory) {
 	g := mk(t)
 	w := seed.Example
-	g.Load(t, w, seed.ImportPreviewed)
+	g.Load(t, w, seed.BaseWithImport)
 	org := w.Org()
 	pin := itest.Bearer(g.PinToken(org))
 	owner := g.Owner(org)
@@ -400,8 +404,11 @@ func Import(t *testing.T, mk Factory) {
 			t.Fatalf("not committed: %s", c.Body)
 		}
 		ops := g.Emitted()
-		if len(ops) != 2 || ops[0].Intent != "menu.import.apply" || !strings.HasSuffix(ops[0].Key, "|c") {
+		if len(ops) != 2 || ops[0].Intent != "menu.import.apply" || ops[0].Muts[0].E != "category" || ops[1].Muts[0].E != "item" || ops[0].Key == ops[1].Key {
 			t.Fatalf("one category op then one item batch expected: %+v", ops)
+		}
+		if ops[0].Actor == "" || ops[0].Stream != "brand:"+w.Brand().String() || ops[0].Seq != 1 || ops[1].Seq != 2 {
+			t.Fatalf("ops are sealed by the gateway on the brand stream in order: %+v", ops)
 		}
 		want(t, g.Call(t, "POST", url, owner, obj{"row_count": 3}), 409, "import_not_previewed")
 		want(t, g.Call(t, "POST", "/v1/menu-imports/"+id+"/cancellation", owner, nil), 409, "import_not_previewed")
@@ -444,6 +451,9 @@ func Import(t *testing.T, mk Factory) {
 		ops := g.Emitted()[before:]
 		var price map[string]any
 		for _, m := range ops[len(ops)-1].Muts {
+			if m.E == "item" {
+				t.Fatalf("an unchanged item name must not be re-set: %+v", m)
+			}
 			if m.E == "price_entry" {
 				price = map[string]any{"k": m.K, "prev": m.Prev["price_paise"], "p": m.F["price_paise"]}
 			}
@@ -491,3 +501,99 @@ func Import(t *testing.T, mk Factory) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// Outage covers a sync gateway that is down (ADR-0014 A2.2 item 7): an interactive edit answers 503 emit.unavailable
+// with Retry-After and changes nothing, and the client's retry with the same key lands once; a queued emission
+// (menu import commit) is accepted at once and reaches the gateway, in order, when it is back.
+func Outage(t *testing.T, mk Factory) {
+	g := mk(t)
+	w := seed.Example
+	g.Load(t, w, seed.Base)
+	owner := g.Owner(w.Org())
+	itemURL := "/v1/items/" + w.Item().String()
+	tax := obj{"tax_class": "fnb_non_gst", "reason": "Alcohol items are outside GST."}
+	keyed := itest.Merge(owner, http.Header{"Idempotency-Key": []string{"outage-edit-1"}})
+
+	g.SetGatewayDown(true)
+	r := g.Call(t, "PUT", itemURL+"/tax-class", keyed, tax)
+	want(t, r, 503, "emit.unavailable")
+	if r.Header.Get("Retry-After") == "" {
+		t.Fatal("emit.unavailable carries Retry-After")
+	}
+	if got := g.Call(t, "GET", itemURL, owner, nil).JSON(t)["tax_class"]; got != "fnb_standard" || len(g.Emitted()) != 0 || len(g.AuditActions(t, w.Org())) != 0 {
+		t.Fatalf("nothing may change while the gateway is down: class %v, ops %d", got, len(g.Emitted()))
+	}
+
+	c := g.Call(t, "POST", "/v1/menu-imports", owner, obj{"filename": "menu.csv", "csv_text": "category,item name,item code,variant name,price,veg mark,station\nMains,Soup,401,,99.00,veg,Kitchen\n"})
+	want(t, c, 201, "")
+	done := g.Call(t, "POST", "/v1/menu-imports/"+c.JSON(t)["id"].(string)+"/commit", owner, obj{"row_count": 1})
+	want(t, done, 200, "")
+	if done.JSON(t)["status"] != "committed" || len(g.Emitted()) != 0 {
+		t.Fatalf("a queued emission is accepted while the gateway is down and waits: %s", done.Body)
+	}
+	if body := g.Call(t, "GET", "/v1/items?q=soup", owner, nil).Body; strings.Contains(string(body), "Soup") {
+		t.Fatalf("the item appears only after its op returns on the bus: %s", body)
+	}
+
+	g.SetGatewayDown(false)
+	g.Settle(t)
+	ops := g.Emitted()
+	if len(ops) != 2 || ops[0].Muts[0].E != "category" || ops[1].Muts[0].E != "item" || ops[0].Seq != 1 || ops[1].Seq != 2 {
+		t.Fatalf("the queue drains in order once the gateway is back: %+v", ops)
+	}
+	if body := g.Call(t, "GET", "/v1/items?q=soup", owner, nil).Body; !strings.Contains(string(body), "Soup") {
+		t.Fatalf("the imported item is projected: %s", body)
+	}
+	g.Settle(t)
+	if len(g.Emitted()) != 2 {
+		t.Fatal("a drained queue sends nothing again")
+	}
+
+	first := g.Call(t, "PUT", itemURL+"/tax-class", keyed, tax)
+	second := g.Call(t, "PUT", itemURL+"/tax-class", keyed, tax)
+	want(t, first, 200, "")
+	if string(first.Body) != string(second.Body) || len(g.Emitted()) != 3 {
+		t.Fatalf("the retry with the same Idempotency-Key lands once: %d ops", len(g.Emitted()))
+	}
+}
+
+// ImportBrand covers which brand an import targets: brand_id, else the brand of X-Outlet-Id, else the only
+// brand, else 422 brand_required; a brand that is not one of the caller's is 404.
+func ImportBrand(t *testing.T, mk Factory) {
+	g := mk(t)
+	w := seed.TwoBrands
+	g.Load(t, w, seed.Base)
+	g.Load(t, seed.Example, seed.Base)
+	owner := g.Owner(w.Org())
+	const csv = "category,item name,item code,variant name,price,veg mark,station\nMains,Soup,401,,99.00,veg,Kitchen\n"
+	create := func(h http.Header, brand any) itest.Response {
+		body := obj{"filename": "menu.csv", "csv_text": csv}
+		if brand != nil {
+			body["brand_id"] = brand
+		}
+		return g.Call(t, "POST", "/v1/menu-imports", h, body)
+	}
+	commit := func(r itest.Response) string {
+		want(t, r, 201, "")
+		want(t, g.Call(t, "POST", "/v1/menu-imports/"+r.JSON(t)["id"].(string)+"/commit", owner, obj{"row_count": 1}), 200, "")
+		ops := g.Emitted()
+		return ops[len(ops)-1].Stream
+	}
+
+	want(t, create(owner, nil), 422, "brand_required")
+	if n := len(g.Emitted()); n != 0 {
+		t.Fatalf("a refused preview emits nothing: %d", n)
+	}
+	if got := commit(create(owner, w.Brand2().String())); got != "brand:"+w.Brand2().String() {
+		t.Fatalf("brand_id names the brand: %s", got)
+	}
+	if got := commit(create(outletHeader(owner, w.Outlet()), nil)); got != "brand:"+w.Brand().String() {
+		t.Fatalf("the brand of the outlet in X-Outlet-Id: %s", got)
+	}
+	want(t, create(owner, seed.Example.Brand().String()), 404, "not_found") // another organisation's brand
+	want(t, create(outletHeader(owner, w.OutletY()), w.Brand().String()), 404, "not_found")
+	want(t, create(outletHeader(owner, seed.Example.Outlet()), nil), 404, "not_found")
+	if only := create(g.Owner(seed.Example.Org()), nil); only.Status != 201 {
+		t.Fatalf("an organisation with one brand needs no brand_id: %d %s", only.Status, only.Body)
+	}
+}

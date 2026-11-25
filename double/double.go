@@ -3,8 +3,10 @@
 // projection of synced ops, menu import) with deterministic ids and time. Other services' tests import it
 // instead of the real service. It is verified by the shared contract suite (api-specs/contracttest).
 //
-// Cloud-side writes (tax class, menu import) go to a loopback emitter that records each op and feeds it back
-// through the projection, as the sync gateway and the bus would; ApplyOp lets a test deliver a device op.
+// Cloud-side writes go to an in-process fake of the sync gateway's emit operation: a tax-class edit is emitted
+// at once, a menu import commit waits in an in-memory emit_queue that a worker drains in order. Each stored op
+// returns to the projection as a sync.op event through go-common/sync.ParseOp, as the bus delivers it; ApplyOp
+// lets a test deliver a device op.
 // Authentication uses the same go-auth verifiers as the real service: give it the test issuers of
 // go-auth/authtest. Failure injection (error status, delay, hang) lets callers test their resilience.
 package double
@@ -20,11 +22,14 @@ import (
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/clock"
+	"github.com/hostryhq/go-common/emit"
+	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 
 	"github.com/hostryhq/svc-catalog/api"
+	"github.com/hostryhq/svc-catalog/internal/fakegw"
 	"github.com/hostryhq/svc-catalog/internal/gen"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/internal/seed"
 	"github.com/hostryhq/svc-catalog/repository/mem"
 	"github.com/hostryhq/svc-catalog/service"
@@ -34,11 +39,12 @@ import (
 type Config struct {
 	Tenant   *auth.Verifier        // tenant-realm tokens (authtest.NewTenantIssuer(...).Verifier())
 	Services *auth.ServiceVerifier // service tokens; support sessions travel with the admin service token (nil: refused)
-	// Clock defaults to a fixed instant, the instant of the spec examples.
+	// Clock defaults to a fixed instant, the instant of the spec examples (plus the world's ClockAdvance).
 	Clock clock.Clock
-	// IDs defaults to a generator driven by Clock with a counter, so ids are deterministic.
+	// IDs defaults to a generator driven by the clock with a counter, so ids are deterministic.
 	IDs *ids.Generator
-	// NoEmitter makes cloud-side writes fail with 503 (a gateway that is down).
+	// NoEmitter starts with the sync gateway down: interactive cloud-side writes (tax class) answer 503
+	// emit.unavailable and queued ones (menu import) wait. SetGatewayDown(false) brings it back.
 	NoEmitter bool
 }
 
@@ -50,26 +56,28 @@ type Fault struct {
 	Hang   bool          // never answer until the request is cancelled (a timeout for the caller)
 }
 
-// Emitted is one op the loopback recorded.
-type Emitted struct {
-	Tenant ids.ID
-	service.Emission
-	OpID string
-}
+// Emitted is one op the sync gateway fake stored: what the bus carries to subscribers.
+type Emitted = fakegw.Sealed
 
 // Double is the running double.
 type Double struct {
 	Store *mem.Store
 	Svc   *service.Service
 	h     http.Handler
-	clk   clock.Clock
+	gw    *fakegw.Gateway
+	ids   *seed.IDs
+	base  clock.Clock
 
 	mu      sync.Mutex
 	fault   []Fault
-	emitted []Emitted
-	pending []pendingOp
-	byKey   map[string]string
-	seqs    map[string]int64
+	offset  time.Duration
+	pending []events.Envelope
+}
+
+func (d *Double) now() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.base.Now().Add(d.offset)
 }
 
 // New builds a double. The store is empty; call SeedWorld to match the spec examples.
@@ -81,18 +89,31 @@ func New(cfg Config) (*Double, error) {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.Func(func() time.Time { return seed.At })
 	}
+	d := &Double{base: cfg.Clock}
+	clk := clock.Func(d.now)
 	if cfg.IDs == nil {
-		cfg.IDs = ids.NewGenerator(cfg.Clock.Now, &counter{})
+		cfg.IDs = ids.NewGenerator(clk.Now, &counter{})
 	}
+	d.gw, err = fakegw.New(clk.Now)
+	if err != nil {
+		return nil, err
+	}
+	// The gateway hands each stored op to subscribers as a sync.op event, after the emitting request ended
+	// (the bus never delivers inside the emitting transaction): see ServeHTTP.
+	d.gw.Deliver = func(_ context.Context, ev events.Envelope) error {
+		d.mu.Lock()
+		d.pending = append(d.pending, ev)
+		d.mu.Unlock()
+		return nil
+	}
+	d.gw.SetDown(cfg.NoEmitter)
 	store := mem.New()
 	log := slog.New(slog.DiscardHandler)
-	svc := service.New(store, service.Options{Clock: cfg.Clock, IDs: cfg.IDs, Log: log})
-	d := &Double{Store: store, Svc: svc, clk: cfg.Clock, byKey: map[string]string{}, seqs: map[string]int64{}}
-	if !cfg.NoEmitter {
-		svc.SetEmitter(d)
-	}
+	d.Store = store
+	d.ids = seed.NewIDs(cfg.IDs)
+	d.Svc = service.New(store, service.Options{Clock: clk, IDs: d.ids, Log: log, Emitter: d.gw})
 	guard := &auth.Guard{Catalogue: cat, Tenant: cfg.Tenant, Services: cfg.Services, Audit: store, Log: log}
-	d.h = api.New(api.Config{Service: svc, Guard: guard, Clock: cfg.Clock, Log: log})
+	d.h = api.New(api.Config{Service: d.Svc, Guard: guard, Clock: clk, Log: log})
 	return d, nil
 }
 
@@ -106,68 +127,56 @@ func (c *counter) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Emit implements service.Emitter: the loopback gateway. A repeated key returns the first op.
-func (d *Double) Emit(ctx context.Context, tenant ids.ID, e service.Emission) (service.Emitted, error) {
-	d.mu.Lock()
-	k := tenant.String() + "|" + e.Key
-	if e.Key != "" {
-		if id, ok := d.byKey[k]; ok {
-			d.mu.Unlock()
-			return service.Emitted{OpID: id}, nil
+// SetGatewayDown makes the sync gateway unreachable (true) or reachable again (false). Ops queued while it is
+// down are sent, in order, by the next request or Settle.
+func (d *Double) SetGatewayDown(down bool) { d.gw.SetDown(down) }
+
+// Settle runs the emit worker and the bus once: queued ops go to the gateway in order, and every op the gateway
+// stored is delivered to catalog's projection as a sync.op event. A request does this itself on return.
+func (d *Double) Settle(ctx context.Context) {
+	for _, q := range d.Store.PendingEmits() {
+		if _, err := d.gw.Emit(ctx, q.Tenant, []emit.Op{q.Op}); err != nil {
+			if emit.IsTransient(err) {
+				break // the gateway is down: the rest waits, in order
+			}
+			slog.Error("double: queued emit refused", "error", err)
+			continue
 		}
+		d.Store.MarkEmitted(q.Tenant, q.Op.Key)
 	}
-	d.seqs[tenant.String()+e.Stream]++
-	n := d.seqs[tenant.String()+e.Stream]
-	opID := fmt.Sprintf("cloud-1/%s/%d", e.Stream, n)
-	if e.Key != "" {
-		d.byKey[k] = opID
-	}
-	d.emitted = append(d.emitted, Emitted{Tenant: tenant, Emission: e, OpID: opID})
-	op := proj.Op{Ref: proj.Ref{Origin: "cloud-1", Stream: e.Stream, Seq: n}, HLC: uint64(d.clk.Now().UnixMilli())<<16 + uint64(n), Intent: e.Intent, Muts: e.Muts}
-	d.pending = append(d.pending, pendingOp{tenant, op})
-	d.mu.Unlock()
-	return service.Emitted{OpID: opID}, nil
-}
-
-type pendingOp struct {
-	tenant ids.ID
-	op     proj.Op
-}
-
-// drain delivers the ops emitted during a request, after its transaction ended (the bus delivers an op after
-// the gateway stored it, never inside the emitting request).
-func (d *Double) drain(ctx context.Context) {
 	d.mu.Lock()
 	p := d.pending
 	d.pending = nil
 	d.mu.Unlock()
-	for _, x := range p {
-		if err := d.Svc.ApplyOpTx(ctx, x.tenant, x.op); err != nil {
-			slog.Error("double: loopback delivery failed", "error", err)
+	for _, ev := range p {
+		if err := d.Svc.ApplyEventTx(ctx, ev); err != nil {
+			slog.Error("double: delivery failed", "error", err)
 		}
 	}
 }
 
-// Emitted returns the ops the loopback recorded, in order.
-func (d *Double) Emitted() []Emitted {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return append([]Emitted(nil), d.emitted...)
-}
+// Emitted returns the ops the gateway fake stored, in order.
+func (d *Double) Emitted() []Emitted { return d.gw.Stored() }
 
-// ApplyOp delivers a device op for tenant, as the bus would.
-func (d *Double) ApplyOp(ctx context.Context, tenant ids.ID, op proj.Op) error {
-	return d.Svc.ApplyOpTx(ctx, tenant, op)
-}
+// ApplyOp delivers a device op for its tenant, as the bus would.
+func (d *Double) ApplyOp(ctx context.Context, op *gsync.Op) error { return d.Svc.ApplyOpTx(ctx, op) }
 
 // SeedWorld empties the double and loads the named example world of the OpenAPI document for the example
 // organisation (contracttest Options.SeedWorld).
 func (d *Double) SeedWorld(ctx context.Context, world string) error {
 	d.Store.Reset()
+	d.gw.Reset()
 	d.mu.Lock()
-	d.emitted, d.byKey, d.seqs = nil, map[string]string{}, map[string]int64{}
+	d.pending, d.offset = nil, 0
 	d.mu.Unlock()
-	return seed.Example.Apply(ctx, d.Svc, world)
+	if err := seed.Example.Apply(ctx, d.Svc, world); err != nil {
+		return err
+	}
+	d.ids.Next(seed.Example, world)
+	d.mu.Lock()
+	d.offset = seed.ClockAdvance(world)
+	d.mu.Unlock()
+	return nil
 }
 
 // SeedOrganisation adds another organisation's base world without resetting (isolation tests).
@@ -220,7 +229,7 @@ func (d *Double) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.h.ServeHTTP(w, r)
-	d.drain(context.WithoutCancel(r.Context()))
+	d.Settle(context.WithoutCancel(r.Context()))
 }
 
 // Server starts the double on an httptest server.

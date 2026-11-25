@@ -27,7 +27,9 @@ func factory(t *testing.T) *httpsuite.Target {
 				t.Fatal(err)
 			}
 		},
-		Emitted: env.Emitted,
+		Emitted:        env.Emitted,
+		SetGatewayDown: env.SetGatewayDown,
+		Settle:         func(testing.TB) { env.Settle(context.Background()) },
 		EventTypes: func(_ testing.TB, tenant ids.ID) []string {
 			var out []string
 			for _, e := range env.Store.Events(tenant) {
@@ -57,3 +59,5 @@ func TestDoubleOutletScope(t *testing.T)   { httpsuite.OutletScope(t, factory) }
 func TestDoubleAuthorization(t *testing.T) { httpsuite.Authorization(t, factory) }
 func TestDoubleTaxClass(t *testing.T)      { httpsuite.TaxClass(t, factory) }
 func TestDoubleImport(t *testing.T)        { httpsuite.Import(t, factory) }
+func TestDoubleOutage(t *testing.T)        { httpsuite.Outage(t, factory) }
+func TestDoubleImportBrand(t *testing.T)   { httpsuite.ImportBrand(t, factory) }

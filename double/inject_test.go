@@ -42,7 +42,7 @@ func TestInjectedFailuresReachCallers(t *testing.T) {
 	}
 }
 
-// A gateway that is down must surface as 503 emit_unavailable, never as a silent success.
+// A gateway that is down must surface as 503 emit.unavailable, never as a silent success.
 func TestCloudWritesAnswer503WithoutAGateway(t *testing.T) {
 	tk := double.NewTokens()
 	d, err := double.New(double.Config{Tenant: tk.TenantIssuer.Verifier(), NoEmitter: true})
@@ -56,7 +56,7 @@ func TestCloudWritesAnswer503WithoutAGateway(t *testing.T) {
 	defer srv.Close()
 	r := itest.Do(t, srv.URL, "PUT", "/v1/items/"+seed.Example.Item().String()+"/tax-class", itest.Bearer(tk.TenantToken(seed.Example.Org())),
 		map[string]any{"tax_class": "exempt", "reason": "Gateway is down."})
-	if r.Status != 503 || r.Code() != "emit_unavailable" {
+	if r.Status != 503 || r.Code() != "emit.unavailable" {
 		t.Fatalf("got %d %s", r.Status, r.Body)
 	}
 }

@@ -6,17 +6,18 @@ package projsuite
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-auth/authtest"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/testkit"
 
+	"github.com/hostryhq/svc-catalog/internal/fakegw"
 	"github.com/hostryhq/svc-catalog/internal/gen"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/internal/seed"
 	"github.com/hostryhq/svc-catalog/service"
 )
@@ -47,8 +48,19 @@ func As(t testing.TB, tenant ids.ID, grants ...auth.Grant) context.Context {
 
 func hlc(ms uint64, counter uint64) uint64 { return ms<<16 + counter }
 
-func op(origin, stream string, seq int64, h uint64, muts ...proj.Mut) proj.Op {
-	return proj.Op{Ref: proj.Ref{Origin: origin, Stream: stream, Seq: seq}, HLC: h, Intent: "menu.item.edit", Muts: muts}
+// hs is the 16-hex-character form of a hybrid clock value, as an op carries it.
+func hs(h uint64) string { return fmt.Sprintf("%016x", h) }
+
+// op builds a device op of the example organisation, as ParseOp would hand it to the service.
+func op(origin, stream string, seq int64, h uint64, muts ...gsync.Mut) *gsync.Op {
+	return &gsync.Op{Ref: gsync.OpRef{Origin: origin, Stream: stream, Seq: seq}, HLC: hs(h), Intent: "menu.item.edit", IntentV: 1,
+		TenantID: seed.Example.Org(), Muts: muts}
+}
+
+// voidOf is the cloud-origin op that voids the refused op ref (intent sync.void, one sync_void record).
+func voidOf(stream string, seq int64, h uint64, ref gsync.OpRef) *gsync.Op {
+	return &gsync.Op{Ref: gsync.OpRef{Origin: "cloud-1", Stream: stream, Seq: seq}, HLC: hs(h), Intent: gsync.VoidIntent, IntentV: 1,
+		TenantID: seed.Example.Org(), Voids: []gsync.OpRef{ref}}
 }
 
 func itemNames(t *testing.T, svc *service.Service, ctx context.Context) map[string]string {
@@ -90,14 +102,14 @@ var (
 	price1  = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f5191"
 )
 
-func insItem(id, name string) proj.Mut {
-	return proj.Mut{E: "item", ID: id, K: proj.KInsert, F: map[string]any{"category_id": catID, "name_en": name, "kitchen_name": name, "veg_mark": "veg",
+func insItem(id, name string) gsync.Mut {
+	return gsync.Mut{E: "item", ID: id, K: gsync.KindInsert, F: map[string]any{"category_id": catID, "name_en": name, "kitchen_name": name, "veg_mark": "veg",
 		"tax_class": "fnb_standard", "status": "active", "sort_order": int64(1)}}
 }
 
 func setup(t *testing.T, svc *service.Service, tenant ids.ID) {
 	t.Helper()
-	if err := svc.ApplyEventTx(ctxBg, outletEvent(tenant, outletA, brandA), nil); err != nil {
+	if err := svc.ApplyEventTx(ctxBg, outletEvent(tenant, outletA, brandA)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -107,18 +119,18 @@ func applyOrder(t *testing.T, mk Factory) {
 	tenant := seed.Example.Org()
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
-	ops := []proj.Op{
+	ops := []*gsync.Op{
 		op("d1", stream, 1, hlc(1000, 0), insItem(item1, "Tea")),
-		op("d2", stream, 1, hlc(1001, 0), proj.Mut{E: "item", ID: item1, K: proj.KSet, F: map[string]any{"name_en": "Chai"}}),
+		op("d2", stream, 1, hlc(1001, 0), gsync.Mut{E: "item", ID: item1, K: gsync.KindSet, F: map[string]any{"name_en": "Chai"}}),
 		op("d1", stream, 2, hlc(1002, 0), insItem(item2, "Coffee")),
 	}
 	for i := len(ops) - 1; i >= 0; i-- { // newest first: sets arrive before the insert they belong to
-		if err := svc.ApplyOpTx(ctxBg, tenant, ops[i]); err != nil {
+		if err := svc.ApplyOpTx(ctxBg, ops[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, o := range ops { // a replay of every op changes nothing
-		if err := svc.ApplyOpTx(ctxBg, tenant, o); err != nil {
+		if err := svc.ApplyOpTx(ctxBg, o); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,28 +145,26 @@ func voids(t *testing.T, mk Factory) {
 	tenant := seed.Example.Org()
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
-	apply := func(o proj.Op) {
+	apply := func(o *gsync.Op) {
 		t.Helper()
-		if err := svc.ApplyOpTx(ctxBg, tenant, o); err != nil {
+		if err := svc.ApplyOpTx(ctxBg, o); err != nil {
 			t.Fatal(err)
 		}
 	}
 	apply(op("d1", stream, 1, hlc(1000, 0), insItem(item1, "Tea")))
-	apply(op("d2", stream, 1, hlc(1005, 0), proj.Mut{E: "item", ID: item1, K: proj.KSet, F: map[string]any{"name_en": "Refused edit"}}))
-	apply(op("d3", stream, 1, hlc(1003, 0), proj.Mut{E: "item", ID: item1, K: proj.KSet, F: map[string]any{"name_en": "Legit edit"}}))
+	apply(op("d2", stream, 1, hlc(1005, 0), gsync.Mut{E: "item", ID: item1, K: gsync.KindSet, F: map[string]any{"name_en": "Refused edit"}}))
+	apply(op("d3", stream, 1, hlc(1003, 0), gsync.Mut{E: "item", ID: item1, K: gsync.KindSet, F: map[string]any{"name_en": "Legit edit"}}))
 	if got := itemNames(t, svc, As(t, tenant))[item1]; got != "Refused edit" {
 		t.Fatalf("before the void the later stamp wins, got %q", got)
 	}
-	void := proj.Op{Ref: proj.Ref{Origin: "cloud-1", Stream: stream, Seq: 1}, HLC: hlc(2000, 0), Intent: proj.IntentVoid,
-		Muts: []proj.Mut{{E: proj.EntityVoid, ID: stream + "|d2|1", K: proj.KInsert, F: map[string]any{"origin": "d2", "stream": stream, "seq": int64(1), "reason": "refused"}}}}
+	void := voidOf(stream, 1, hlc(2000, 0), gsync.OpRef{Origin: "d2", Stream: stream, Seq: 1})
 	apply(void)
 	if got := itemNames(t, svc, As(t, tenant))[item1]; got != "Legit edit" {
 		t.Fatalf("a void must restore the legitimate earlier edit, got %q", got)
 	}
 	apply(void) // replayed void: no-op
 	// A void of the only insert removes the row.
-	apply(proj.Op{Ref: proj.Ref{Origin: "cloud-1", Stream: stream, Seq: 2}, HLC: hlc(2001, 0), Intent: proj.IntentVoid,
-		Muts: []proj.Mut{{E: proj.EntityVoid, ID: "x", K: proj.KInsert, F: map[string]any{"origin": "d1", "stream": stream, "seq": int64(1)}}}})
+	apply(voidOf(stream, 2, hlc(2001, 0), gsync.OpRef{Origin: "d1", Stream: stream, Seq: 1}))
 	if got := itemNames(t, svc, As(t, tenant)); len(got) != 0 {
 		t.Fatalf("voiding the insert must remove the row, have %v", got)
 	}
@@ -165,10 +175,9 @@ func voidFirst(t *testing.T, mk Factory) {
 	tenant := seed.Example.Org()
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
-	void := proj.Op{Ref: proj.Ref{Origin: "cloud-1", Stream: stream, Seq: 1}, HLC: hlc(2000, 0), Intent: proj.IntentVoid,
-		Muts: []proj.Mut{{E: proj.EntityVoid, ID: "x", K: proj.KInsert, F: map[string]any{"origin": "d1", "stream": stream, "seq": int64(1)}}}}
-	for _, o := range []proj.Op{void, op("d1", stream, 1, hlc(1000, 0), insItem(item1, "Tea"))} {
-		if err := svc.ApplyOpTx(ctxBg, tenant, o); err != nil {
+	void := voidOf(stream, 1, hlc(2000, 0), gsync.OpRef{Origin: "d1", Stream: stream, Seq: 1})
+	for _, o := range []*gsync.Op{void, op("d1", stream, 1, hlc(1000, 0), insItem(item1, "Tea"))} {
+		if err := svc.ApplyOpTx(ctxBg, o); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -182,21 +191,21 @@ func priceConflict(t *testing.T, mk Factory) {
 	tenant := seed.Example.Org()
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
-	apply := func(o proj.Op) {
+	apply := func(o *gsync.Op) {
 		t.Helper()
-		if err := svc.ApplyOpTx(ctxBg, tenant, o); err != nil {
+		if err := svc.ApplyOpTx(ctxBg, o); err != nil {
 			t.Fatal(err)
 		}
 	}
-	price := func(p int64, prev string) proj.Mut {
-		m := proj.Mut{E: "price_entry", ID: price1, K: proj.KSet, F: map[string]any{"price_paise": p}}
+	price := func(p int64, prev string) gsync.Mut {
+		m := gsync.Mut{E: "price_entry", ID: price1, K: gsync.KindSet, F: map[string]any{"price_paise": p}}
 		if prev != "" {
 			m.Prev = map[string]string{"price_paise": prev}
 		}
 		return m
 	}
-	apply(op("d1", stream, 1, hlc(1000, 0), proj.Mut{E: "price_entry", ID: price1, K: proj.KInsert, F: map[string]any{"item_id": item1, "price_paise": int64(24000)}}))
-	seen := proj.FormatHLC(hlc(1000, 0))
+	apply(op("d1", stream, 1, hlc(1000, 0), gsync.Mut{E: "price_entry", ID: price1, K: gsync.KindInsert, F: map[string]any{"item_id": item1, "price_paise": int64(24000)}}))
+	seen := hs(hlc(1000, 0))
 	apply(op("d1", stream, 2, hlc(1010, 0), price(24500, seen)))
 	ctx := As(t, tenant)
 	exc := func() []service.ExceptionView {
@@ -221,7 +230,7 @@ func priceConflict(t *testing.T, mk Factory) {
 	if len(exc()) != 1 {
 		t.Fatal("re-applying the op must not add a finding")
 	}
-	apply(op("m", stream, 1, hlc(1030, 0), price(25000, proj.FormatHLC(hlc(1020, 0))))) // the manager saw the conflict
+	apply(op("m", stream, 1, hlc(1030, 0), price(25000, hs(hlc(1020, 0))))) // the manager saw the conflict
 	if g := exc(); len(g) != 1 || g[0].Status != "superseded" {
 		t.Fatalf("a later edit that saw the winner supersedes the finding: %+v", g)
 	}
@@ -237,16 +246,16 @@ func ignored(t *testing.T, mk Factory) {
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
 	ctx := As(t, tenant)
-	apply := func(o proj.Op) {
+	apply := func(o *gsync.Op) {
 		t.Helper()
-		if err := svc.ApplyOpTx(ctxBg, tenant, o); err != nil {
+		if err := svc.ApplyOpTx(ctxBg, o); err != nil {
 			t.Fatal(err)
 		}
 	}
 	apply(op("d1", stream, 1, hlc(1000, 0),
-		proj.Mut{E: "bill", ID: "b1", K: proj.KInsert, F: map[string]any{"total_paise": int64(1)}}, // another owner's entity
-		proj.Mut{E: "station", ID: "s1", K: proj.KInsert, F: map[string]any{"code": "K"}},          // outlet entity on a brand stream
-		proj.Mut{E: "item", ID: item1, K: "rank", F: map[string]any{"name_en": "x"}},               // kind catalog does not use
+		gsync.Mut{E: "bill", ID: "b1", K: gsync.KindInsert, F: map[string]any{"total_paise": int64(1)}}, // another owner's entity
+		gsync.Mut{E: "station", ID: "s1", K: gsync.KindInsert, F: map[string]any{"code": "K"}},          // outlet entity on a brand stream
+		gsync.Mut{E: "item", ID: item1, K: "rank", F: map[string]any{"name_en": "x"}},                   // kind catalog does not use
 		insItem(item2, "Kept")))
 	apply(op("d1", "tenant:"+tenant.String(), 1, hlc(1001, 0), insItem("other", "Tenant stream")))
 	apply(op("d1", "brand:not-a-uuid", 1, hlc(1002, 0), insItem("bad", "Bad stream")))
@@ -257,23 +266,31 @@ func ignored(t *testing.T, mk Factory) {
 	if err != nil || len(st.Items) != 0 {
 		t.Fatalf("an outlet entity on a brand stream must be ignored: %v %v", st.Items, err)
 	}
-	if err := svc.ApplyEventTx(ctxBg, events.Envelope{ID: ids.New(), Type: "billing.bill.recorded", V: 1, Source: "billing", TenantID: tenant, Key: "k", OccurredAt: seed.At, Data: json.RawMessage(`{}`)}, nil); err != nil {
+	if err := svc.ApplyEventTx(ctxBg, events.Envelope{ID: ids.New(), Type: "billing.bill.recorded", V: 1, Source: "billing", TenantID: tenant, Key: "k", OccurredAt: seed.At, Data: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("an event catalog does not consume is ignored: %v", err)
 	}
 }
 
-type fetcher struct {
-	body string
-	err  error
+// itemEvent is the bus event of a device op that inserts item1, with a correct hash (events/sync/op.v1.yaml).
+func itemEvent(tenant ids.ID, stream string, seq int64, name string) events.Envelope {
+	return fakegw.Event(fakegw.Sealed{Tenant: tenant, N: seq, Origin: "dev-1", Stream: stream, Seq: seq, HLC: hs(hlc(1000, 0)), Intent: "menu.item.edit", IntentV: 1,
+		Actor: "dev-1", At: seed.At, Muts: []gsync.Mut{insItem(item1, name)}})
 }
 
-func (f fetcher) Body(context.Context, ids.ID, string, string, int64) (string, error) {
-	return f.body, f.err
-}
-
-func opEvent(tenant ids.ID, typ string, data map[string]any) events.Envelope {
-	b, _ := json.Marshal(data)
-	return events.Envelope{ID: ids.New(), Type: typ, V: 1, Source: "sync", TenantID: tenant, Key: "k", OccurredAt: seed.At, Data: b}
+// edit rewrites the JSON of an event's data (or the envelope) so a test probes one field.
+func edit(t *testing.T, ev events.Envelope, f func(data map[string]any)) events.Envelope {
+	t.Helper()
+	var d map[string]any
+	if err := json.Unmarshal(ev.Data, &d); err != nil {
+		t.Fatal(err)
+	}
+	f(d)
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev.Data = b
+	return ev
 }
 
 func opEvents(t *testing.T, mk Factory) {
@@ -281,37 +298,27 @@ func opEvents(t *testing.T, mk Factory) {
 	tenant := seed.Example.Org()
 	setup(t, svc, tenant)
 	stream := "brand:" + brandA.String()
-	body := `{"origin":"dev-1","stream":"` + stream + `","seq":1,"hlc":"` + proj.FormatHLC(hlc(1000, 0)) + `","intent":"menu.item.edit","muts":[{"e":"item","id":"` + item1 + `","k":"insert","f":{"category_id":"` + catID + `","name_en":"Via event","kitchen_name":"Via event","veg_mark":"none","tax_class":"fnb_standard","status":"active","sort_order":1}}]}`
-	base := map[string]any{"origin": "dev-1", "stream": stream, "seq": 1, "intent": "menu.item.edit", "status": "accepted"}
-	ev := func(extra map[string]any) events.Envelope {
-		d := map[string]any{}
-		for k, v := range base {
-			d[k] = v
+	good := itemEvent(tenant, stream, 1, "Via event")
+	for name, ev := range map[string]events.Envelope{
+		"a quarantined op (never published with a body)": edit(t, good, func(d map[string]any) { d["status"] = "quarantined" }),
+		"an event without a body":                        edit(t, good, func(d map[string]any) { delete(d, "body") }),
+		"a hash that is not the body's":                  edit(t, good, func(d map[string]any) { d["h"] = gsync.Hash("other") }),
+		"an identity that differs from the body":         edit(t, good, func(d map[string]any) { d["seq"] = 2 }),
+	} {
+		if err := svc.ApplyEventTx(ctxBg, ev); err == nil {
+			t.Fatalf("%s must be refused (retried, then parked)", name)
 		}
-		for k, v := range extra {
-			d[k] = v
-		}
-		return opEvent(tenant, "sync.op.stored", d)
-	}
-	if err := svc.ApplyEventTx(ctxBg, ev(map[string]any{"status": "quarantined", "body": body}), nil); err != nil {
-		t.Fatal(err)
 	}
 	if got := itemNames(t, svc, As(t, tenant)); len(got) != 0 {
-		t.Fatal("a quarantined op must not be applied")
+		t.Fatalf("a refused event must not apply anything: %v", got)
 	}
-	if err := svc.ApplyEventTx(ctxBg, ev(nil), nil); !errors.Is(err, service.ErrOpBodyUnavailable) {
-		t.Fatalf("an event without a body and no fetcher is retried then parked: %v", err)
+	flagged := edit(t, good, func(d map[string]any) { d["status"] = "flagged"; d["marks"] = []string{"unsealed"} })
+	for _, ev := range []events.Envelope{flagged, good} { // a flagged op is applied; the same op again is a no-op
+		if err := svc.ApplyEventTx(ctxBg, ev); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := svc.ApplyEventTx(ctxBg, ev(map[string]any{"seq": 2, "body": body}), nil); err == nil {
-		t.Fatal("a body whose identity differs from its event must be refused")
-	}
-	if err := svc.ApplyEventTx(ctxBg, ev(nil), fetcher{body: body}); err != nil {
-		t.Fatalf("body fetched from the gateway: %v", err)
-	}
-	if err := svc.ApplyEventTx(ctxBg, ev(map[string]any{"body": body, "status": "flagged"}), nil); err != nil {
-		t.Fatalf("a flagged op is applied (and a replay is a no-op): %v", err)
-	}
-	if got := itemNames(t, svc, As(t, tenant)); got[item1] != "Via event" {
+	if got := itemNames(t, svc, As(t, tenant)); got[item1] != "Via event" || len(got) != 1 {
 		t.Fatalf("op applied from its event: %v", got)
 	}
 }

@@ -6,11 +6,11 @@ import (
 
 	"github.com/hostryhq/go-auth/scopetest"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 	"github.com/hostryhq/go-common/testkit"
 
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/internal/seed"
 	"github.com/hostryhq/svc-catalog/repository"
 	"github.com/hostryhq/svc-catalog/service"
@@ -24,7 +24,7 @@ func T14(t *testing.T, mk Factory) {
 	tenant := testkit.TenantA
 	brand := ids.ID("018f0000-0000-7000-8000-0000000000b1")
 	for _, o := range []string{scopetest.OutletX, scopetest.OutletY} {
-		if err := svc.ApplyEventTx(ctxBg, outletEvent(tenant, ids.ID(o), brand), nil); err != nil {
+		if err := svc.ApplyEventTx(ctxBg, outletEvent(tenant, ids.ID(o), brand)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -36,9 +36,9 @@ func T14(t *testing.T, mk Factory) {
 			for _, o := range []string{x, y} {
 				id := ids.New().String()
 				seq++
-				op := proj.Op{Ref: proj.Ref{Origin: "t14", Stream: "outlet:" + o, Seq: seq}, HLC: uint64(1000+seq) << 16, Intent: "settings.outlet.edit",
-					Muts: []proj.Mut{{E: entity, ID: id, K: proj.KInsert, F: f(id)}}}
-				if err := svc.ApplyOpTx(ctxBg, tenant, op); err != nil {
+				op := &gsync.Op{Ref: gsync.OpRef{Origin: "t14", Stream: "outlet:" + o, Seq: seq}, HLC: hs(uint64(1000+seq) << 16), Intent: "settings.outlet.edit", IntentV: 1,
+					TenantID: tenant, Muts: []gsync.Mut{{E: entity, ID: id, K: gsync.KindInsert, F: f(id)}}}
+				if err := svc.ApplyOpTx(ctxBg, op); err != nil {
 					return "", "", err
 				}
 				outletOf[id] = o

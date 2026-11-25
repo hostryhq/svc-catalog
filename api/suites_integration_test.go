@@ -8,7 +8,6 @@ import (
 
 	"github.com/hostryhq/go-common/ids"
 
-	"github.com/hostryhq/svc-catalog/double"
 	"github.com/hostryhq/svc-catalog/internal/httpsuite"
 	"github.com/hostryhq/svc-catalog/internal/itest"
 	"github.com/hostryhq/svc-catalog/internal/seed"
@@ -43,7 +42,9 @@ func factory(t *testing.T) *httpsuite.Target {
 				t.Fatal(err)
 			}
 		},
-		Emitted: func() []double.Emitted { return append([]double.Emitted(nil), s.Loopback.Ops...) },
+		Emitted:        s.Gateway.Stored,
+		SetGatewayDown: s.Gateway.SetDown,
+		Settle:         func(testing.TB) { s.Settle(context.Background()) },
 		EventTypes: func(t testing.TB, tenant ids.ID) []string {
 			return column(t, s, `SELECT type FROM outbox WHERE tenant_id = $1 ORDER BY seq`, tenant)
 		},
@@ -61,3 +62,5 @@ func TestRealOutletScope(t *testing.T)   { httpsuite.OutletScope(t, factory) }
 func TestRealAuthorization(t *testing.T) { httpsuite.Authorization(t, factory) }
 func TestRealTaxClass(t *testing.T)      { httpsuite.TaxClass(t, factory) }
 func TestRealImport(t *testing.T)        { httpsuite.Import(t, factory) }
+func TestRealOutage(t *testing.T)        { httpsuite.Outage(t, factory) }
+func TestRealImportBrand(t *testing.T)   { httpsuite.ImportBrand(t, factory) }

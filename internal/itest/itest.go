@@ -1,71 +1,71 @@
 // Package itest assembles the real service (Postgres-backed) for integration tests: a fresh database on the
 // local dev stack (internal/pgtest), the wired handler, a fixed clock for entity timestamps and the test token
-// issuer. The sync gateway is replaced by a loopback emitter, as in the double. Other services' integration
-// tests use the double instead.
+// issuer. The sync gateway is replaced by an in-process fake of its emit operation (internal/fakegw), called
+// over HTTP by the real emit client and emit_queue worker, as in the double. Other services' integration tests
+// use the double instead.
 package itest
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hostryhq/go-common/clock"
+	"github.com/hostryhq/go-common/emit"
+	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
 	"github.com/hostryhq/go-common/testkit"
 
 	"github.com/hostryhq/svc-catalog/double"
 	"github.com/hostryhq/svc-catalog/internal/app"
+	"github.com/hostryhq/svc-catalog/internal/fakegw"
 	"github.com/hostryhq/svc-catalog/internal/pgtest"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/internal/seed"
-	"github.com/hostryhq/svc-catalog/service"
 )
-
-// Loopback is the gateway stand-in: it records the op and applies it through the projection, as the bus would.
-type Loopback struct {
-	mu    sync.Mutex
-	Svc   *service.Service
-	Clock clock.Clock
-	Ops   []double.Emitted
-	keys  map[string]string
-	seq   map[string]int64
-}
-
-// Emit implements service.Emitter.
-func (l *Loopback) Emit(ctx context.Context, tenant ids.ID, e service.Emission) (service.Emitted, error) {
-	l.mu.Lock()
-	if l.keys == nil {
-		l.keys, l.seq = map[string]string{}, map[string]int64{}
-	}
-	if id, ok := l.keys[tenant.String()+e.Key]; ok && e.Key != "" {
-		l.mu.Unlock()
-		return service.Emitted{OpID: id}, nil
-	}
-	l.seq[tenant.String()+e.Stream]++
-	n := l.seq[tenant.String()+e.Stream]
-	id := fmt.Sprintf("cloud-1/%s/%d", e.Stream, n)
-	l.keys[tenant.String()+e.Key] = id
-	l.Ops = append(l.Ops, double.Emitted{Tenant: tenant, Emission: e, OpID: id})
-	l.mu.Unlock()
-	op := proj.Op{Ref: proj.Ref{Origin: "cloud-1", Stream: e.Stream, Seq: n}, HLC: uint64(l.Clock.Now().UnixMilli())<<16 + uint64(n), Intent: e.Intent, Muts: e.Muts}
-	return service.Emitted{OpID: id}, l.Svc.ApplyOpTx(context.WithoutCancel(ctx), tenant, op)
-}
 
 // Stack is the real service over a fresh database.
 type Stack struct {
-	DB       *pgtest.DB
-	App      *app.App
-	Srv      *httptest.Server
-	Clock    *testkit.FakeClock
-	Loopback *Loopback
+	DB    *pgtest.DB
+	App   *app.App
+	Srv   *httptest.Server
+	Clock *testkit.FakeClock
+	// Gateway is the in-process fake of the sync gateway; GatewaySrv serves its emit operation over HTTP, which
+	// the real emit client and emit_queue worker call.
+	Gateway    *fakegw.Gateway
+	GatewaySrv *httptest.Server
+	Queue      *emit.Queue
+	IDs        *seed.IDs
 	*double.Tokens
+
+	mu      sync.Mutex
+	pending []events.Envelope
+	skew    *skewClock
+}
+
+// skewClock is the queue worker's clock: real time plus an offset the stack moves forward, so rows that backed
+// off while the gateway was down are due at the next Settle without waiting.
+type skewClock struct {
+	mu  sync.Mutex
+	off time.Duration
+}
+
+func (c *skewClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.off).UTC()
+}
+
+func (c *skewClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.off += d
+	c.mu.Unlock()
 }
 
 // New starts a stack.
@@ -75,16 +75,61 @@ func New(t testing.TB) *Stack {
 	clk := testkit.NewClock()
 	clk.Set(seed.At)
 	tk := double.NewTokens()
-	lb := &Loopback{Clock: clk}
-	a, err := app.Build(app.Options{AppDB: db.App, Tenant: tk.TenantIssuer.Verifier(), Services: tk.Registry.Verifier("catalog"), Clock: clk, AuthClock: clock.System,
-		IDs: ids.NewGenerator(clk.Now, nil), Log: slog.New(slog.DiscardHandler), Emitter: lb})
+	gw, err := fakegw.New(clk.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lb.Svc = a.Service
-	s := &Stack{DB: db, App: a, Srv: httptest.NewServer(a.Handler), Clock: clk, Loopback: lb, Tokens: tk}
+	gsrv := httptest.NewServer(gw)
+	t.Cleanup(gsrv.Close)
+	client := &emit.Client{BaseURL: gsrv.URL, Token: func(context.Context) (string, error) { return "test-service-token", nil }}
+	var skew skewClock
+	idsrc := seed.NewIDs(ids.NewGenerator(clk.Now, nil))
+	a, err := app.Build(app.Options{AppDB: db.App, Tenant: tk.TenantIssuer.Verifier(), Services: tk.Registry.Verifier("catalog"), Clock: clk, AuthClock: clock.System,
+		IDs: idsrc, Log: slog.New(slog.DiscardHandler), Emitter: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Stack{DB: db, skew: &skew, App: a, Clock: clk, IDs: idsrc, Gateway: gw, GatewaySrv: gsrv, Tokens: tk,
+		Queue: &emit.Queue{DB: db.Relay, Emitter: client, Log: slog.New(slog.DiscardHandler), Clock: &skew}}
+	// Stored ops reach the projection as bus events, after the emitting request: see Settle.
+	gw.Deliver = func(_ context.Context, ev events.Envelope) error {
+		s.mu.Lock()
+		s.pending = append(s.pending, ev)
+		s.mu.Unlock()
+		return nil
+	}
+	s.Srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.Handler.ServeHTTP(w, r)
+		s.Settle(context.WithoutCancel(r.Context()))
+	}))
 	t.Cleanup(s.Srv.Close)
 	return s
+}
+
+// Settle runs the emit worker once (queued ops go to the gateway over HTTP, in order) and delivers every op the
+// gateway stored to the projection through the bus consumer path (ParseOp, in a transaction).
+func (s *Stack) Settle(ctx context.Context) {
+	s.skew.advance(time.Hour)
+	if _, err := s.Queue.Drain(ctx); err != nil {
+		slog.Error("itest: emit queue drain", "error", err)
+	}
+	s.mu.Lock()
+	p := s.pending
+	s.pending = nil
+	s.mu.Unlock()
+	for _, ev := range p {
+		tx, err := s.DB.App.BeginTx(ctx, nil)
+		if err == nil {
+			if err = s.App.Consume(ctx, tx, ev); err == nil {
+				err = tx.Commit()
+			} else {
+				_ = tx.Rollback()
+			}
+		}
+		if err != nil {
+			slog.Error("itest: delivery failed", "error", err)
+		}
+	}
 }
 
 // SeedWorld empties the database and stores the named example world (contracttest Options.SeedWorld).
@@ -92,7 +137,14 @@ func (s *Stack) SeedWorld(ctx context.Context, world string) error {
 	if err := s.DB.Truncate(ctx); err != nil {
 		return err
 	}
-	return seed.Example.Apply(ctx, s.App.Service, world)
+	s.Gateway.Reset()
+	s.Clock.Set(seed.At)
+	if err := seed.Example.Apply(ctx, s.App.Service, world); err != nil {
+		return err
+	}
+	s.IDs.Next(seed.Example, world)
+	s.Clock.Set(seed.At.Add(seed.ClockAdvance(world)))
+	return nil
 }
 
 // Response is a decoded HTTP answer.

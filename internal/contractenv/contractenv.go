@@ -1,8 +1,6 @@
-// Package contractenv prepares the shared contract suite (api-specs/contracttest) for this service. It is used by
-// the contract tests of the double and of the real service, so both run the same checks.
-//
-// The suite sends each operation once with the spec's example inputs, after SeedWorld has put the target into
-// the operation's example world (internal/seed). This package supplies the spec files.
+// Package contractenv locates the OpenAPI document the shared contract suite (api-specs/contracttest) runs
+// against. It is used by the contract tests of the double and of the real service, so both run the same checks,
+// each operation after SeedWorld has put the target into the operation's example world (internal/seed).
 package contractenv
 
 import (
@@ -13,13 +11,8 @@ import (
 	"testing"
 )
 
-// The shared X-Outlet-Id parameter (common/components.yaml) carries the example 4a5c, an id no entity uses; the
-// catalog examples are all about outlet 4a61. SpecPath rewrites it in a temporary copy (spec problem reported
-// to api-specs).
-var fixes = map[string]string{"0c1d2e3f4a5c": "0c1d2e3f4a61"}
-
-// SpecPath returns the path of a patched copy of the catalog OpenAPI document (with common/ beside it). The
-// api-specs checkout comes from API_SPECS_DIR, or from the module this repo resolves (the pinned version).
+// SpecPath returns the path of the catalog OpenAPI document. The api-specs checkout comes from API_SPECS_DIR, or
+// from the module this repo resolves (the pinned version, or the workspace checkout during development).
 func SpecPath(t testing.TB) string {
 	t.Helper()
 	root := os.Getenv("API_SPECS_DIR")
@@ -30,31 +23,5 @@ func SpecPath(t testing.TB) string {
 		}
 		root = strings.TrimSpace(string(out))
 	}
-	dst := t.TempDir()
-	for _, d := range []string{"openapi/catalog/v1", "common"} {
-		if err := os.MkdirAll(filepath.Join(dst, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		entries, err := os.ReadDir(filepath.Join(root, d))
-		if err != nil {
-			t.Fatalf("read %s: %v", d, err)
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			b, err := os.ReadFile(filepath.Join(root, d, e.Name()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			s := string(b)
-			for from, to := range fixes {
-				s = strings.ReplaceAll(s, from, to)
-			}
-			if err := os.WriteFile(filepath.Join(dst, d, e.Name()), []byte(s), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	return filepath.Join(dst, "openapi/catalog/v1/openapi.yaml")
+	return filepath.Join(root, "openapi/catalog/v1/openapi.yaml")
 }
