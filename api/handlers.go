@@ -6,6 +6,7 @@ import (
 	"github.com/hostryhq/go-common/ids"
 
 	"github.com/hostryhq/svc-catalog/internal/gen"
+	"github.com/hostryhq/svc-catalog/internal/model"
 	"github.com/hostryhq/svc-catalog/internal/page"
 	"github.com/hostryhq/svc-catalog/service"
 )
@@ -206,7 +207,18 @@ func (s *Server) CreateMenuImport(w http.ResponseWriter, r *http.Request, _ gen.
 	if !ok {
 		return
 	}
-	im, err := s.svc.CreateMenuImport(ctx, in.Filename, in.CsvText)
+	var brand ids.ID
+	if in.BrandId != nil {
+		b, err := ids.Parse(string(*in.BrandId))
+		if err != nil {
+			s.fail(w, r, model.Invalid("brand_id", "invalid", "not a valid id"))
+			return
+		}
+		brand = b
+	}
+	// The operation does not declare X-Outlet-Id (spec problem, docs/notes.md) but its description gives the
+	// header the meaning "the brand of this outlet"; it is read like the header of every scoped operation.
+	im, err := s.svc.CreateMenuImport(ctx, in.Filename, in.CsvText, brand, r.Header.Get("X-Outlet-Id"))
 	s.reply(w, r, http.StatusCreated, importDTO(im), err)
 }
 

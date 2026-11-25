@@ -13,11 +13,14 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/apperr"
 	"github.com/hostryhq/go-common/clock"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/health"
 	"github.com/hostryhq/go-common/httpx"
 	"github.com/hostryhq/go-common/idempotency"
@@ -162,8 +165,18 @@ func (s *Server) pathID(w http.ResponseWriter, r *http.Request, raw string) (ids
 	return id, true
 }
 
-// fail writes err as a problem.
+// fail writes err as a problem. The gateway being down is 503 emit.unavailable with Retry-After (the one code of
+// every service, ADR-0014 A2.2 item 7); a gateway refusal is a defect here and is 500 emit.rejected.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	var rej *emit.RejectedError
+	switch {
+	case errors.As(err, &rej):
+		s.log.ErrorContext(r.Context(), "catalog: the gateway refused an emit", "status", rej.Status, "code", rej.Code)
+		err = rej.AppError()
+	case emit.IsTransient(err):
+		after := max(emit.RetryAfter(err), time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(int((after+time.Second-1)/time.Second)))
+	}
 	apperr.WriteProblem(w, r, err)
 }
 

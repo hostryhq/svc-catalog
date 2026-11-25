@@ -3,19 +3,23 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/apperr"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 
 	cev "github.com/hostryhq/svc-catalog/events"
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
-	"github.com/hostryhq/svc-catalog/internal/uuid5"
 	"github.com/hostryhq/svc-catalog/repository"
 )
+
+// PermSupportImport is the permission a support act-mode session exercises to import (it widens menu.import).
+const PermSupportImport = "catalog.import"
 
 // IntentImport is the intent of the emitted import ops (api-specs entities: item and price_entry list
 // menu.import.apply among their written_by_intents).
@@ -30,7 +34,15 @@ func importSource(ctx context.Context) string {
 
 // CreateMenuImport validates the CSV, stores the preview job and returns it. Nothing is emitted until commit.
 // An import of a file with errors is stored too (the owner reads its row errors) but cannot be committed.
-func (s *Service) CreateMenuImport(ctx context.Context, filename, csvText string) (model.Import, error) {
+//
+// The menu belongs to a brand: brand names it, else outlet (X-Outlet-Id) does, else the organisation's only
+// brand. A support act-mode session may only add (new categories, items, variants): a row that would change an
+// existing item, variant or price is refused 422 owner_commit_required, and the owner imports it themselves.
+func (s *Service) CreateMenuImport(ctx context.Context, filename, csvText string, brand ids.ID, outlet string) (model.Import, error) {
+	return s.createMenuImport(ctx, importSource(ctx), filename, csvText, brand, outlet)
+}
+
+func (s *Service) createMenuImport(ctx context.Context, source, filename, csvText string, brand ids.ID, outlet string) (model.Import, error) {
 	if strings.TrimSpace(filename) == "" {
 		return model.Import{}, model.Invalid("filename", ErrRequired, "a file name is required")
 	}
@@ -39,11 +51,12 @@ func (s *Service) CreateMenuImport(ctx context.Context, filename, csvText string
 		return model.Import{}, err
 	}
 	return run(ctx, s, func(ctx context.Context, tx repository.Tx) (model.Import, error) {
-		sc, _, err := s.scope(ctx, tx, PermImport, "")
+		job := s.newID() // minted first: the id of a created job is the one an example world expects
+		sc, _, err := s.scope(ctx, tx, PermImport, outlet)
 		if err != nil {
 			return model.Import{}, err
 		}
-		brand, err := s.importBrand(ctx, tx, sc)
+		brand, err := s.importBrand(ctx, tx, sc, brand)
 		if err != nil {
 			return model.Import{}, err
 		}
@@ -51,7 +64,11 @@ func (s *Service) CreateMenuImport(ctx context.Context, filename, csvText string
 		if err != nil {
 			return model.Import{}, err
 		}
-		im := model.Import{ID: s.newID(), Status: model.ImportPreviewed, Source: importSource(ctx), Filename: truncate(filename, 100), RowCount: len(rows),
+		if source == model.SourceSupport && len(errs) == 0 && changesExisting(plan) {
+			return model.Import{}, apperr.New(apperr.Validation, "owner_commit_required",
+				"a support import may only add; rows that change an existing item, variant or price need the owner's own import")
+		}
+		im := model.Import{ID: job, Status: model.ImportPreviewed, Source: source, Filename: truncate(filename, 100), RowCount: len(rows),
 			ErrorCount: len(errs), Errors: errs, CategoriesCreated: counts.categories, ItemsCreated: counts.created, ItemsUpdated: counts.updated,
 			PriceChanges: counts.priceChanges, CreatedAt: now(s), CreatedBy: actor(ctx), Plan: plan}
 		if len(im.Errors) > maxReportedErrors {
@@ -67,20 +84,43 @@ func (s *Service) CreateMenuImport(ctx context.Context, filename, csvText string
 	})
 }
 
-// importBrand picks the brand an import targets. The API names none (spec problem, docs/notes.md): Phase 2
-// organisations have one brand, so the brand shared by the caller's outlets is used; several brands is a 422.
-func (s *Service) importBrand(ctx context.Context, tx repository.Tx, sc auth.OutletScope) (ids.ID, error) {
+// importBrand picks the brand an import targets: the one named (404 when it is not a brand of the caller's
+// outlets, so another organisation's brand is indistinguishable from an unknown one), else the brand of the
+// outlet in scope when there is exactly one, else 422 brand_required.
+func (s *Service) importBrand(ctx context.Context, tx repository.Tx, sc auth.OutletScope, want ids.ID) (ids.ID, error) {
 	b, err := tx.BrandsOf(ctx, sc)
 	if err != nil {
 		return "", err
 	}
+	if want != "" {
+		if !slices.Contains(b, want) {
+			return "", model.ErrNotFound
+		}
+		return want, nil
+	}
 	switch len(b) {
 	case 0:
-		return "", model.Invalid("brand", "no_outlet", "the organisation has no outlet yet")
+		return "", model.Invalid("brand_id", "no_outlet", "the organisation has no outlet yet")
 	case 1:
 		return b[0], nil
 	}
-	return "", model.Invalid("brand", "brand_ambiguous", "the organisation has several brands; an import targets one brand")
+	return "", apperr.New(apperr.Validation, "brand_required", "the organisation has several brands; name the brand or an outlet")
+}
+
+// changesExisting reports whether the plan changes anything that already exists: a renamed item or a changed price.
+// Adding categories, items and variants is not a change.
+func changesExisting(plan *model.ImportPlan) bool {
+	for _, it := range plan.Items {
+		if it.NameChanged {
+			return true
+		}
+		for _, v := range it.Variants {
+			if v.PriceChanged {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type planCounts struct{ categories, created, updated, priceChanges int }
@@ -227,7 +267,7 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 			matched = false
 		}
 		if matched {
-			it.ID, it.Exists = ex.ID, true
+			it.ID, it.Exists, it.NameChanged = ex.ID, true, ex.Str("name_en") != g.first.name
 			counts.updated++
 			// An existing item keeps its category, kitchen name, station, veg mark and tax class: a re-import
 			// updates names and prices (RM-M9).
@@ -246,6 +286,7 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 							pv.PriceID = cur.ID // the existing row, whatever its id
 							if cur.Int("price_paise") != paise {
 								counts.priceChanges++
+								pv.PriceChanged = true
 							}
 						}
 					}
@@ -255,7 +296,7 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 				pv.ID = s.newID().String()
 			}
 			if pv.PriceID == "" {
-				pv.PriceID = uuid5.PriceEntry(it.ID, pv.ID)
+				pv.PriceID = PriceEntryID(it.ID, pv.ID)
 			}
 			it.Variants = append(it.Variants, pv)
 		}
@@ -351,10 +392,14 @@ func (s *Service) CommitMenuImport(ctx context.Context, id ids.ID, rowCount int)
 		if err != nil {
 			return model.Import{}, err
 		}
-		for _, em := range importEmissions(id, im.Plan, s.importBatch, prev) {
-			if _, err := s.emit(ctx, tenant, em); err != nil {
-				return model.Import{}, err
-			}
+		// Queued emission (ADR-0014 A2.2 item 7): the ops join emit_queue in this transaction, so they exist
+		// exactly when the job is committed, and a worker sends them in order whatever the gateway does.
+		perm := PermImport
+		if im.Source == model.SourceSupport {
+			perm = PermSupportImport
+		}
+		if err := tx.EmitEnqueue(ctx, importOps(id, im.Plan, s.importBatch, prev, emitActor(ctx), perm)...); err != nil {
+			return model.Import{}, err
 		}
 		t := now(s)
 		im.Status, im.CommittedAt, im.Plan = model.ImportCommitted, &t, nil
@@ -394,37 +439,52 @@ func (s *Service) currentPriceStamps(ctx context.Context, tx repository.Tx, bran
 	return out, nil
 }
 
-// importEmissions turns a plan into ops: one for the new categories and one per batch of items. Keys derive
-// from the job id.
-func importEmissions(job ids.ID, plan *model.ImportPlan, batch int, prev map[string]model.Row) []Emission {
+// importOps turns a plan into ops: one for the new categories and one per batch of items. Keys are
+// deterministic in the job id and the position, so a replayed commit is the same ops at the gateway.
+func importOps(job ids.ID, plan *model.ImportPlan, batch int, prev map[string]model.Row, who, perm string) []emit.Op {
 	stream := "brand:" + plan.BrandID
-	var out []Emission
-	var cm []proj.Mut
+	op := func(key string, muts []gsync.Mut) emit.Op {
+		return emit.Op{Key: emit.DeterministicKey("menu-import", job.String(), key), Stream: stream, Intent: IntentImport, IntentV: 1,
+			Muts: muts, Actor: who, AuthorisedBy: &perm}
+	}
+	var out []emit.Op
+	var cm []gsync.Mut
 	for _, c := range plan.Categories {
 		f := map[string]any{"name_en": c.NameEn, "default_tax_class": c.TaxClass, "sort_order": int64(c.Sort), "status": "active"}
 		if c.Station != "" {
 			f["default_station_code"] = c.Station
 		}
-		cm = append(cm, proj.Mut{E: "category", ID: c.ID, K: proj.KInsert, F: f})
+		cm = append(cm, gsync.Mut{E: "category", ID: c.ID, K: gsync.KindInsert, F: f})
 	}
 	if len(cm) > 0 {
-		out = append(out, Emission{Stream: stream, Intent: IntentImport, Key: "import|" + job.String() + "|c", Muts: cm})
+		out = append(out, op("c", cm))
 	}
 	for start, n := 0, 0; start < len(plan.Items); start, n = start+batch, n+1 {
 		end := min(start+batch, len(plan.Items))
-		var ms []proj.Mut
+		var ms []gsync.Mut
 		for _, it := range plan.Items[start:end] {
 			ms = append(ms, itemMuts(it, prev)...)
 		}
-		out = append(out, Emission{Stream: stream, Intent: IntentImport, Key: fmt.Sprintf("import|%s|i%d", job, n), Muts: ms})
+		out = append(out, op(fmt.Sprintf("i%d", n), ms))
 	}
 	return out
 }
 
-func itemMuts(it model.PlanItem, prev map[string]model.Row) []proj.Mut {
-	var ms []proj.Mut
+// PriceEntryID is the deterministic id of the price row of an item and variant (entity file price_entry:
+// price_entry|{item_id}|{variant_id or "-"}), so two devices that price the same variant write one row.
+func PriceEntryID(itemID, variantID string) string {
+	if variantID == "" {
+		variantID = "-"
+	}
+	return gsync.UUIDv5("price_entry|" + itemID + "|" + variantID)
+}
+
+func itemMuts(it model.PlanItem, prev map[string]model.Row) []gsync.Mut {
+	var ms []gsync.Mut
 	if it.Exists {
-		ms = append(ms, proj.Mut{E: "item", ID: it.ID, K: proj.KSet, F: map[string]any{"name_en": it.NameEn}})
+		if it.NameChanged {
+			ms = append(ms, gsync.Mut{E: "item", ID: it.ID, K: gsync.KindSet, F: map[string]any{"name_en": it.NameEn}})
+		}
 	} else {
 		f := map[string]any{"category_id": it.CategoryID, "name_en": it.NameEn, "kitchen_name": it.KitchenEn, "veg_mark": it.VegMark,
 			"tax_class": it.TaxClass, "status": "active", "sort_order": int64(it.Sort)}
@@ -434,16 +494,16 @@ func itemMuts(it model.PlanItem, prev map[string]model.Row) []proj.Mut {
 		if it.Station != "" {
 			f["station_code"] = it.Station
 		}
-		ms = append(ms, proj.Mut{E: "item", ID: it.ID, K: proj.KInsert, F: f})
+		ms = append(ms, gsync.Mut{E: "item", ID: it.ID, K: gsync.KindInsert, F: f})
 	}
 	for _, v := range it.Variants {
 		if !v.Exists {
-			ms = append(ms, proj.Mut{E: "item_variant", ID: v.ID, K: proj.KInsert, F: map[string]any{"item_id": it.ID, "name": v.Name, "is_default": v.Default, "sort_order": int64(v.Sort)}})
+			ms = append(ms, gsync.Mut{E: "item_variant", ID: v.ID, K: gsync.KindInsert, F: map[string]any{"item_id": it.ID, "name": v.Name, "is_default": v.Default, "sort_order": int64(v.Sort)}})
 		}
 		if cur, ok := prev[v.PriceID]; ok {
-			ms = append(ms, proj.Mut{E: "price_entry", ID: v.PriceID, K: proj.KSet, F: map[string]any{"price_paise": v.PricePaise}, Prev: prevStamp(cur, "price_paise")})
+			ms = append(ms, gsync.Mut{E: "price_entry", ID: v.PriceID, K: gsync.KindSet, F: map[string]any{"price_paise": v.PricePaise}, Prev: prevStamp(cur, "price_paise")})
 		} else {
-			ms = append(ms, proj.Mut{E: "price_entry", ID: v.PriceID, K: proj.KInsert, F: map[string]any{"item_id": it.ID, "variant_id": v.ID, "price_paise": v.PricePaise}})
+			ms = append(ms, gsync.Mut{E: "price_entry", ID: v.PriceID, K: gsync.KindInsert, F: map[string]any{"item_id": it.ID, "variant_id": v.ID, "price_paise": v.PricePaise}})
 		}
 	}
 	return ms

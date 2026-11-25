@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/hostryhq/go-auth"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 )
 
 // Repository opens transactions.
@@ -58,15 +59,6 @@ type RowQuery struct {
 	Limit int
 }
 
-// EffectRec is a stored effect with the row it belongs to.
-type EffectRec struct {
-	Entity  string
-	RowID   string
-	Stream  string
-	ScopeID ids.ID
-	proj.Effect
-}
-
 // RowKey identifies one row.
 type RowKey struct {
 	Entity, ID, Stream string
@@ -91,19 +83,19 @@ type Tx interface {
 	BrandsOf(ctx context.Context, scope auth.OutletScope) ([]ids.ID, error)
 
 	// ---- projection of synced ops ----
-	// LockProjection serialises projection writers of the tenant.
+	// LockProjection serialises projection writers of the tenant, so a row is resolved from a complete set of
+	// candidates.
 	LockProjection(ctx context.Context) error
-	// OpState reports whether the op was seen and whether it is voided. A void may arrive before its op.
-	OpState(ctx context.Context, key string) (seen, voided bool, err error)
-	PutOp(ctx context.Context, key, stream, intent string, voided bool, now time.Time) error
-	// VoidOp marks the op voided (creating the marker if the op was not seen), deletes its effects and
-	// returns the rows they touched.
-	VoidOp(ctx context.Context, key string, now time.Time) ([]RowKey, error)
-	AddEffects(ctx context.Context, fx []EffectRec) error
-	EffectsOf(ctx context.Context, k RowKey) ([]proj.Effect, error)
+	// SyncStore is the candidate and void store of the go-common/sync engine, bound to this transaction.
+	SyncStore() gsync.Store
 	PutRow(ctx context.Context, r model.Row) error
-	// DeleteRow removes a projected row whose last insert was voided.
+	// DeleteRow removes a projected row that no longer exists (its inserts were voided).
 	DeleteRow(ctx context.Context, k RowKey) error
+
+	// ---- cloud-origin emissions (ADR-0014 A2.2) ----
+	// EmitEnqueue adds ops to emit_queue in this transaction; a worker sends them to the gateway in order. An
+	// op whose key is already queued is ignored.
+	EmitEnqueue(ctx context.Context, ops ...emit.Op) error
 
 	// ---- reads ----
 	GetRow(ctx context.Context, q RowQuery, id string) (model.Row, error)

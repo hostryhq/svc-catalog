@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
 	"github.com/hostryhq/go-common/inbox"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 
 	"github.com/hostryhq/svc-catalog/internal/pgtest"
@@ -73,7 +75,7 @@ func TestRowLevelSecurityFailsClosed(t *testing.T) {
 		}
 		return n
 	}
-	for _, table := range []string{"brand_rows", "outlet_rows", "effects", "ops", "outlets"} {
+	for _, table := range []string{"brand_rows", "outlet_rows", "sync_candidates", "outlets"} {
 		all, one, none := count(seed.Example.Org(), table), count(seed.Other.Org(), table), count("", table)
 		if none != 0 {
 			t.Errorf("%s: no tenant context must see no row, saw %d", table, none)
@@ -89,6 +91,60 @@ func TestRowLevelSecurityFailsClosed(t *testing.T) {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO outlets (tenant_id, outlet_id, brand_id, kind, status) VALUES ($1,$2,$3,'restaurant','active')`,
 		seed.Other.Org(), ids.New(), ids.New()); err == nil {
 		t.Fatal("inserting a row for another tenant must fail")
+	}
+}
+
+// emit_queue holds every tenant's queued ops, so the application role sees only its own tenant's rows and cannot
+// change them, while the relay role (the worker) sees and updates all of them (migration 002).
+func TestEmitQueueRoles(t *testing.T) {
+	db := pgtest.New(t)
+	ctx := context.Background()
+	a, b := seed.Example.Org(), seed.Other.Org()
+	perm := "menu.import"
+	op := emit.Op{Key: emit.DeterministicKey("test", "1"), Stream: "brand:" + seed.Example.Brand().String(), Intent: "menu.import.apply", IntentV: 1, Actor: "member-1", AuthorisedBy: &perm,
+		Muts: []gsync.Mut{{E: "category", ID: seed.Example.Category().String(), K: gsync.KindInsert, F: map[string]any{"name_en": "Starters"}}}}
+	tx, err := db.App.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenancy.SetDBContext(ctx, tx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := emit.Enqueue(ctx, tx, time.Now(), a, op, op); err != nil { // the second is the same key: ignored
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	seen := func(d *sql.DB, tenant ids.ID) int {
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if tenant != "" {
+			_ = tenancy.SetDBContext(ctx, tx, tenant)
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM emit_queue`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := seen(db.App, a); n != 1 {
+		t.Fatalf("the enqueuing tenant sees its one row, saw %d", n)
+	}
+	if n, m := seen(db.App, b), seen(db.App, ""); n != 0 || m != 0 {
+		t.Fatalf("another tenant and no tenant see nothing: %d %d", n, m)
+	}
+	if n := seen(db.Relay, ""); n != 1 {
+		t.Fatalf("the worker's role sees the row of every tenant, saw %d", n)
+	}
+	tx, _ = db.App.BeginTx(ctx, nil)
+	defer func() { _ = tx.Rollback() }()
+	_ = tenancy.SetDBContext(ctx, tx, a)
+	if _, err := tx.ExecContext(ctx, `UPDATE emit_queue SET state = 'sent'`); err == nil {
+		t.Fatal("the application role must not change queue rows")
 	}
 }
 
@@ -116,7 +172,7 @@ func TestConsumerThroughTheInbox(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return svc.ApplyEvent(ctx, rtx, env, nil)
+		return svc.ApplyEvent(ctx, rtx, env)
 	}
 	sub := &inbox.Subscriber{DB: db.App, Consumer: "catalog:test", Handle: handle, Log: slog.New(slog.DiscardHandler)}
 	d, _ := json.Marshal(map[string]any{"outlet_id": w.Outlet(), "brand_id": w.Brand(), "kind": "restaurant", "status": "active"})

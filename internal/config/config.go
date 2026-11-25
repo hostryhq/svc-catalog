@@ -25,6 +25,9 @@ type Config struct {
 	TenantIssuer, TenantAudience string
 	// TaxClasses are the tax classes an owner may choose; the rule set in force is billing's data.
 	TaxClasses []string
+	// SyncURL is the base URL of the sync gateway (its internal emit operation); ServiceSigningKey is the path of
+	// this service's EC private key (PEM) that signs service tokens, by reference. Empty SyncURL: no emitter.
+	SyncURL, ServiceSigningKey string
 	// NatsURL and NatsSeedFile connect the outbox relay and the consumers to the bus; empty disables both.
 	NatsURL, NatsSeedFile string
 	KeyRefresh            time.Duration
@@ -35,18 +38,20 @@ type Config struct {
 func Load(lookup config.Lookup) (Config, error) {
 	l := config.New(lookup)
 	c := Config{
-		Addr:           l.String("CATALOG_ADDR", ":8080"),
-		AppDSN:         l.Required("CATALOG_DB_APP_DSN"),
-		RelayDSN:       l.String("CATALOG_DB_RELAY_DSN", ""),
-		MigrateDSN:     l.String("CATALOG_DB_MIGRATE_DSN", ""),
-		TenantJWKS:     l.Required("CATALOG_TENANT_JWKS"),
-		TenantIssuer:   l.String("CATALOG_TENANT_ISSUER", "hostry-identity"),
-		TenantAudience: l.String("CATALOG_TENANT_AUDIENCE", "hostry-tenant"),
-		ServiceKeys:    l.String("CATALOG_SERVICE_KEYS", ""),
-		NatsURL:        l.String("NATS_URL", ""),
-		NatsSeedFile:   l.String("NATS_SEED_FILE", ""),
-		KeyRefresh:     l.Duration("CATALOG_KEY_REFRESH", time.Minute),
-		LogLevel:       l.String("LOG_LEVEL", "info"),
+		Addr:              l.String("CATALOG_ADDR", ":8080"),
+		AppDSN:            l.Required("CATALOG_DB_APP_DSN"),
+		RelayDSN:          l.String("CATALOG_DB_RELAY_DSN", ""),
+		MigrateDSN:        l.String("CATALOG_DB_MIGRATE_DSN", ""),
+		TenantJWKS:        l.Required("CATALOG_TENANT_JWKS"),
+		TenantIssuer:      l.String("CATALOG_TENANT_ISSUER", "hostry-identity"),
+		TenantAudience:    l.String("CATALOG_TENANT_AUDIENCE", "hostry-tenant"),
+		ServiceKeys:       l.String("CATALOG_SERVICE_KEYS", ""),
+		SyncURL:           l.String("CATALOG_SYNC_URL", ""),
+		ServiceSigningKey: l.String("CATALOG_SERVICE_SIGNING_KEY", ""),
+		NatsURL:           l.String("NATS_URL", ""),
+		NatsSeedFile:      l.String("NATS_SEED_FILE", ""),
+		KeyRefresh:        l.Duration("CATALOG_KEY_REFRESH", time.Minute),
+		LogLevel:          l.String("LOG_LEVEL", "info"),
 	}
 	for _, t := range strings.Split(l.String("CATALOG_TAX_CLASSES", "fnb_standard,fnb_non_gst,exempt"), ",") {
 		if t = strings.TrimSpace(t); t != "" {

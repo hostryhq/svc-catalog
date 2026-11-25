@@ -5,76 +5,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/repository"
 )
 
-// Event types catalog consumes.
+// Event types catalog consumes besides the sync op events (sync.op.<namespace>, one durable consumer per
+// namespace, ADR-0014 A2.1).
 const (
-	EventOpStored      = "sync.op.stored" // proof-of-concept name; sync.op.<namespace> once ADR-0002 A2.3 fixes it
 	EventOutletCreated = "tenancy.outlet.created"
 	EventOutletUpdated = "tenancy.outlet.updated"
 )
 
-// ErrOpBodyUnavailable is returned when an op event carries no body and no fetcher is configured: the event is
-// retried and then parked (docs/notes.md, "ADR needed: op bodies on the bus").
-var ErrOpBodyUnavailable = errors.New("service: op event carries no body")
-
-// OpBodyFetcher reads the canonical body of a stored op from the gateway when the event does not carry it.
-type OpBodyFetcher interface {
-	Body(ctx context.Context, tenant ids.ID, origin, stream string, seq int64) (string, error)
-}
-
-// opEventData is the payload of a sync op event. Body (the canonical JSON text of the op body, byte for byte
-// as the gateway stored it) is the one field the proof-of-concept event lacks.
-type opEventData struct {
-	Origin string `json:"origin"`
-	Stream string `json:"stream"`
-	Seq    int64  `json:"seq"`
-	H      string `json:"h"`
-	Intent string `json:"intent"`
-	Status string `json:"status"`
-	Body   string `json:"body"`
-}
+// serviceName is catalog's name in the entity registry (owner, replicated_to).
+const serviceName = "catalog"
 
 // ApplyEvent applies one bus event inside tx (the tenant context of ctx is the event's tenant, and tx is bound
-// to it). It is idempotent: an op already applied, or voided before it arrived, changes nothing.
-func (s *Service) ApplyEvent(ctx context.Context, tx repository.Tx, env events.Envelope, fetch OpBodyFetcher) error {
+// to it). A sync op event is read only through go-common/sync.ParseOp (verification, size limits, upcasters);
+// a malformed one is an error, so the inbox retries and then parks it. Applying is idempotent and needs no
+// order (ADR-0014 A2.1 item 5).
+func (s *Service) ApplyEvent(ctx context.Context, tx repository.Tx, env events.Envelope) error {
 	switch {
 	case strings.HasPrefix(env.Type, "sync.op."):
-		var d opEventData
-		if err := json.Unmarshal(env.Data, &d); err != nil {
-			return fmt.Errorf("service: op event data: %w", err)
-		}
-		if d.Status != "" && d.Status != "accepted" && d.Status != "flagged" {
-			return nil // quarantined, voided and held ops are not applied (ADR-0002 S11)
-		}
-		if kind, _, ok := proj.StreamScope(d.Stream); !ok || kind == "tenant" {
-			return nil // the tenant stream carries only entities other services own
-		}
-		body := d.Body
-		if body == "" {
-			if fetch == nil {
-				return ErrOpBodyUnavailable
-			}
-			var err error
-			if body, err = fetch.Body(ctx, env.TenantID, d.Origin, d.Stream, d.Seq); err != nil {
-				return err
-			}
-		}
-		op, err := proj.ParseBody(body)
+		op, err := s.parser.ParseEnvelope(env)
 		if err != nil {
 			return err
-		}
-		if op.Origin != d.Origin || op.Stream != d.Stream || op.Seq != d.Seq {
-			return fmt.Errorf("service: op body identity does not match its event")
 		}
 		return s.ApplyOp(ctx, tx, op)
 	case env.Type == EventOutletCreated || env.Type == EventOutletUpdated:
@@ -100,172 +63,240 @@ func (s *Service) ApplyEvent(ctx context.Context, tx repository.Tx, env events.E
 
 // ApplyEventTx runs ApplyEvent in a transaction of its own for the event's tenant (the double and tests; the
 // Postgres consumer binds the inbox transaction instead).
-func (s *Service) ApplyEventTx(ctx context.Context, env events.Envelope, fetch OpBodyFetcher) error {
+func (s *Service) ApplyEventTx(ctx context.Context, env events.Envelope) error {
 	ctx = tenancy.With(ctx, tenancy.Context{TenantID: env.TenantID})
-	return s.repo.InTx(ctx, func(ctx context.Context, tx repository.Tx) error { return s.ApplyEvent(ctx, tx, env, fetch) })
+	return s.repo.InTx(ctx, func(ctx context.Context, tx repository.Tx) error { return s.ApplyEvent(ctx, tx, env) })
 }
 
-// ApplyOp projects one op. Order does not matter: the row is derived from the whole set of its effects.
-func (s *Service) ApplyOp(ctx context.Context, tx repository.Tx, op proj.Op) error {
-	kind, scope, ok := proj.StreamScope(op.Stream)
+// streamScope splits a stream name ("brand:<id>", "outlet:<id>", "tenant:<id>").
+func streamScope(stream string) (kind, id string, ok bool) {
+	kind, id, ok = strings.Cut(stream, ":")
+	return kind, id, ok && id != ""
+}
+
+// ApplyOp projects one parsed op through the go-common/sync engine: every mutation of an entity catalog owns
+// becomes a candidate, and each row the op touches (or a void exposes) is resolved from its candidates and
+// the void set, so the row is a function of the set of ops, whatever their arrival order. Mutations of
+// entities another service owns, or of an entity on a stream it does not live in, are ignored (ADR-0002 S13).
+func (s *Service) ApplyOp(ctx context.Context, tx repository.Tx, op *gsync.Op) error {
+	if op.TenantID == "" {
+		return errors.New("service: op without a tenant")
+	}
+	// tx is bound to one tenant; the stores refuse a key of another (pg) or are per tenant (mem).
+	kind, scope, ok := streamScope(op.Ref.Stream)
 	if !ok || (kind != model.StreamBrand && kind != model.StreamOutlet) {
+		return nil // the tenant stream carries only entities other services own
+	}
+	if _, err := ids.Parse(scope); err != nil {
+		s.log.WarnContext(ctx, "catalog: op on a stream with a malformed id ignored", "stream", kind)
 		return nil
 	}
-	scopeID, err := ids.Parse(scope)
-	if err != nil {
-		s.log.WarnContext(ctx, "catalog: op on a stream with a malformed id ignored", "stream", kind)
+	own := *op
+	own.Muts = nil
+	for _, m := range op.Muts {
+		if e, ok := s.reg.Entities[m.E]; ok && e.Stream == kind {
+			own.Muts = append(own.Muts, m)
+		}
+	}
+	if len(own.Muts) == 0 && len(own.Voids) == 0 {
 		return nil
 	}
 	if err := tx.LockProjection(ctx); err != nil {
 		return err
 	}
-	key := op.Key()
-	seen, _, err := tx.OpState(ctx, key)
-	if err != nil || seen {
-		return err // idempotent apply: an op applied twice, or voided before it arrived, does nothing
-	}
-	if err := tx.PutOp(ctx, key, op.Stream, op.Intent, false, s.clock.Now()); err != nil {
+	store := tx.SyncStore()
+	eng := &gsync.Engine{Reg: s.reg, Service: serviceName, Store: store}
+	res, err := eng.Apply(ctx, &own)
+	if err != nil {
 		return err
 	}
-	if op.Intent == proj.IntentVoid {
-		return s.applyVoids(ctx, tx, op)
-	}
-	var fx []repository.EffectRec
-	touched := map[repository.RowKey]bool{}
-	var order []repository.RowKey
-	for i, m := range op.Muts {
-		def, ok := proj.Entities[m.E]
-		if !ok || def.Stream != kind || m.ID == "" || len(m.ID) > 64 {
-			continue // an entity of another owner, or unknown to this release (ADR-0002 S13): ignored
-		}
-		switch m.K {
-		case proj.KInsert, proj.KSet, proj.KDel, proj.KUndel:
-		default:
-			continue
-		}
-		rk := repository.RowKey{Entity: m.E, ID: m.ID, Stream: kind, ScopeID: scopeID}
-		fx = append(fx, repository.EffectRec{Entity: m.E, RowID: m.ID, Stream: kind, ScopeID: scopeID, Effect: proj.Effect{
-			Op: key, St: proj.Stamp{HLC: op.HLC, Origin: op.Origin, Seq: op.Seq, Idx: i}, Kind: m.K, F: m.F, Prev: m.Prev}})
-		if !touched[rk] {
-			touched[rk] = true
-			order = append(order, rk)
-		}
-	}
-	if err := tx.AddEffects(ctx, fx); err != nil {
-		return err
-	}
-	return s.rederive(ctx, tx, order)
-}
-
-func (s *Service) applyVoids(ctx context.Context, tx repository.Tx, op proj.Op) error {
-	var touched []repository.RowKey
-	for _, m := range op.Muts {
-		if m.E != proj.EntityVoid {
-			continue
-		}
-		origin, _ := m.F["origin"].(string)
-		stream, _ := m.F["stream"].(string)
-		seq, _ := m.F["seq"].(int64)
-		if origin == "" || stream == "" || seq < 1 {
-			continue
-		}
-		rows, err := tx.VoidOp(ctx, proj.Ref{Origin: origin, Stream: stream, Seq: seq}.Key(), s.clock.Now())
-		if err != nil {
-			return err
-		}
-		touched = append(touched, rows...)
-	}
-	return s.rederive(ctx, tx, touched)
-}
-
-// rederive recomputes each touched row from its effects, stores or deletes it and refreshes its price-conflict
-// findings.
-func (s *Service) rederive(ctx context.Context, tx repository.Tx, keys []repository.RowKey) error {
-	seen := map[repository.RowKey]bool{}
-	for _, rk := range keys {
-		if seen[rk] {
-			continue
-		}
-		seen[rk] = true
-		fx, err := tx.EffectsOf(ctx, rk)
-		if err != nil {
-			return err
-		}
-		d := proj.Derive(fx)
-		if !d.Exists {
-			if err := tx.DeleteRow(ctx, rk); err != nil {
-				return err
-			}
-		} else if err := tx.PutRow(ctx, model.Row{Entity: rk.Entity, ID: rk.ID, Stream: rk.Stream, ScopeID: rk.ScopeID,
-			Fields: d.Fields, Stamps: d.Stamps, Gone: d.Gone, UpdatedAt: s.clock.Now().UTC()}); err != nil {
-			return err
-		}
-		if err := s.detect(ctx, tx, rk, fx); err != nil {
+	for _, r := range res.Rows {
+		if err := s.writeRow(ctx, tx, store, r); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// detect derives the price-conflict findings of one row (RM-M4: concurrent edits of a price field keep the
-// winner, retain the loser and ask a manager to confirm). A brand-stream row concerns every outlet of the
-// brand known to catalog; an outlet-stream row, its outlet.
-func (s *Service) detect(ctx context.Context, tx repository.Tx, rk repository.RowKey, fx []proj.Effect) error {
-	def := proj.Entities[rk.Entity]
-	var keep []string
-	conflicts := proj.Conflicts(rk.Entity, fx)
-	if len(conflicts) > 0 {
-		var outlets []ids.ID
-		if rk.Stream == model.StreamOutlet {
-			outlets = []ids.ID{rk.ScopeID}
-		} else {
-			all, err := tx.ListOutlets(ctx, allOutlets)
-			if err != nil {
-				return err
-			}
-			for _, o := range all {
-				if o.BrandID == rk.ScopeID {
-					outlets = append(outlets, o.ID)
-				}
-			}
+// ApplyOpTx projects one op in a transaction of its own (the example-world seed and tests; the Postgres
+// consumer applies events inside the inbox transaction instead).
+func (s *Service) ApplyOpTx(ctx context.Context, op *gsync.Op) error {
+	ctx = tenancy.With(ctx, tenancy.Context{TenantID: op.TenantID})
+	return s.repo.InTx(ctx, func(ctx context.Context, tx repository.Tx) error { return s.ApplyOp(ctx, tx, op) })
+}
+
+// writeRow stores the resolved row (or removes it when no live insert is left) and refreshes its findings.
+func (s *Service) writeRow(ctx context.Context, tx repository.Tx, store gsync.Store, row gsync.Row) error {
+	ent := s.reg.Entities[row.Key.Entity]
+	all, err := store.Candidates(ctx, row.Key)
+	if err != nil {
+		return err
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	refs := make([]gsync.OpRef, len(all))
+	for i, c := range all {
+		refs[i] = c.Ref
+	}
+	voided, err := store.Voided(ctx, row.Key.Tenant, refs)
+	if err != nil {
+		return err
+	}
+	var live []gsync.Candidate
+	for _, c := range all {
+		if !voided[c.Ref] {
+			live = append(live, c)
 		}
-		for _, c := range conflicts {
-			if !def.PriceFields[c.Field] {
-				continue
-			}
-			status := model.StatusOpen
-			if c.Superseded {
-				status = model.StatusSuperseded
-			}
-			for _, o := range outlets {
-				dk := strings.Join([]string{model.KindPriceConflict, rk.Entity, rk.ID, c.Field, c.Later.Op, o.String()}, "|")
-				keep = append(keep, dk)
-				e := model.Exception{ID: s.newID(), Kind: model.KindPriceConflict, Severity: "warning", Status: status, SubjectKind: rk.Entity,
-					SubjectID: rk.ID, OutletID: o, DetectedAt: s.clock.Now().UTC(), DetailKey: "exception.price_conflict", DedupeKey: dk,
-					Params: map[string]any{"kept_paise": asInt(c.Later.F[c.Field]), "lost_paise": asInt(c.Earlier.F[c.Field])}}
-				if status == model.StatusSuperseded {
-					t := s.clock.Now().UTC()
-					e.ResolvedAt = &t
-				}
-				if err := tx.UpsertException(ctx, e); err != nil {
-					return err
-				}
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].Stamp().Compare(live[j].Stamp()) < 0 })
+	sort.Slice(all, func(i, j int) bool { return all[i].Stamp().Compare(all[j].Stamp()) < 0 })
+	_, scope, ok := streamScope(all[0].Ref.Stream)
+	scopeID, perr := ids.Parse(scope)
+	if !ok || perr != nil {
+		s.log.WarnContext(ctx, "catalog: op on a stream with a malformed id ignored", "entity", ent.Name)
+		return nil
+	}
+	rk := repository.RowKey{Entity: ent.Name, ID: row.Key.ID, Stream: ent.Stream, ScopeID: scopeID}
+	if !row.Exists {
+		if err := tx.DeleteRow(ctx, rk); err != nil {
+			return err
+		}
+	} else if err := tx.PutRow(ctx, model.Row{Entity: ent.Name, ID: row.Key.ID, Stream: ent.Stream, ScopeID: scopeID,
+		Fields: row.Fields, Stamps: winnerStamps(ent, row.Fields, live), Gone: row.Deleted, UpdatedAt: now(s)}); err != nil {
+		return err
+	}
+	return s.detect(ctx, tx, ent, rk, row.Conflicts, live)
+}
+
+// groupFields lists the fields that win together with the named lww field (its declared group, else itself).
+func groupFields(ent *gsync.Entity, name string) []string {
+	f := ent.Fields[name]
+	if f.Group == "" {
+		return []string{name}
+	}
+	var out []string
+	for _, n := range ent.FieldNames() {
+		if g := ent.Fields[n]; (g.Policy == gsync.PolicyLWW || g.Policy == gsync.PolicyLWWReview) && g.Group == f.Group {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// carriers returns the live candidates (in stamp order) that write any field of the group.
+func carriers(live []gsync.Candidate, names []string) []gsync.Candidate {
+	var out []gsync.Candidate
+	for _, c := range live {
+		if c.Kind != gsync.KindInsert && c.Kind != gsync.KindSet {
+			continue
+		}
+		for _, n := range names {
+			if _, ok := c.F[n]; ok {
+				out = append(out, c)
+				break
 			}
 		}
 	}
-	return tx.SupersedeExceptions(ctx, rk.Entity, rk.ID, keep, s.clock.Now().UTC())
+	return out
+}
+
+// winnerStamps maps each lww field of the row to the hlc of the write that won its group; a later edit of a
+// review field cites it as `prev`.
+func winnerStamps(ent *gsync.Entity, fields map[string]any, live []gsync.Candidate) map[string]string {
+	out := map[string]string{}
+	for name := range fields {
+		if f := ent.Fields[name]; f == nil || (f.Policy != gsync.PolicyLWW && f.Policy != gsync.PolicyLWWReview) {
+			continue
+		}
+		if cs := carriers(live, groupFields(ent, name)); len(cs) > 0 {
+			out[name] = cs[len(cs)-1].HLC
+		}
+	}
+	return out
+}
+
+// sawPredecessor: the writer of c saw p when, for every review field c carries, its prev is p's hlc.
+func sawPredecessor(c, p gsync.Candidate, names []string) bool {
+	seen := false
+	for _, n := range names {
+		if _, ok := c.F[n]; !ok {
+			continue
+		}
+		seen = true
+		if c.Prev[n] != p.HLC {
+			return false
+		}
+	}
+	return seen
+}
+
+// detect derives the price-conflict findings of one row (RM-M4: concurrent edits of a price field keep the
+// winner, retain the loser and ask a manager to confirm). A brand-stream row concerns every outlet of the
+// brand known to catalog; an outlet-stream row, its outlet. A finding closes as superseded once a later edit
+// saw the winner. Conflicts of other review fields (tax class) are resolved by the engine and need no finding.
+func (s *Service) detect(ctx context.Context, tx repository.Tx, ent *gsync.Entity, rk repository.RowKey, conflicts []gsync.Conflict, live []gsync.Candidate) error {
+	var keep []string
+	var outlets []ids.ID
+	for _, c := range conflicts {
+		var field string
+		for _, n := range c.Fields {
+			if f := ent.Fields[n]; f != nil && f.Type == "paise" {
+				field = n
+			}
+		}
+		if field == "" {
+			continue
+		}
+		if outlets == nil {
+			if rk.Stream == model.StreamOutlet {
+				outlets = []ids.ID{rk.ScopeID}
+			} else {
+				all, err := tx.ListOutlets(ctx, allOutlets)
+				if err != nil {
+					return err
+				}
+				outlets = []ids.ID{}
+				for _, o := range all {
+					if o.BrandID == rk.ScopeID {
+						outlets = append(outlets, o.ID)
+					}
+				}
+			}
+		}
+		cs := carriers(live, c.Fields)
+		wi := slices.IndexFunc(cs, func(x gsync.Candidate) bool { return x.Stamp() == c.Winner })
+		if wi < 0 {
+			continue
+		}
+		status := model.StatusOpen
+		for j := wi + 1; j < len(cs); j++ {
+			if sawPredecessor(cs[j], cs[j-1], c.Fields) {
+				status = model.StatusSuperseded
+				break
+			}
+		}
+		for _, o := range outlets {
+			dk := strings.Join([]string{model.KindPriceConflict, rk.Entity, rk.ID, field, cs[wi].Ref.String(), o.String()}, "|")
+			keep = append(keep, dk)
+			e := model.Exception{ID: s.newID(), Kind: model.KindPriceConflict, Severity: "warning", Status: status, SubjectKind: rk.Entity,
+				SubjectID: rk.ID, OutletID: o, DetectedAt: now(s), DetailKey: "exception.price_conflict", DedupeKey: dk,
+				Params: map[string]any{"kept_paise": asInt(cs[wi].F[field]), "lost_paise": asInt(c.LoserValues[field])}}
+			if status == model.StatusSuperseded {
+				t := now(s)
+				e.ResolvedAt = &t
+			}
+			if err := tx.UpsertException(ctx, e); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.SupersedeExceptions(ctx, rk.Entity, rk.ID, keep, now(s))
 }
 
 func asInt(v any) int64 {
 	n, _ := v.(int64)
 	return n
-}
-
-// ApplyOpTx projects one op in a transaction of its own for tenant (the double's loopback emitter and the
-// example-world seed; the Postgres consumer applies events inside the inbox transaction instead).
-func (s *Service) ApplyOpTx(ctx context.Context, tenant ids.ID, op proj.Op) error {
-	ctx = tenancy.With(ctx, tenancy.Context{TenantID: tenant})
-	return s.repo.InTx(ctx, func(ctx context.Context, tx repository.Tx) error { return s.ApplyOp(ctx, tx, op) })
 }
 
 // Repo exposes the repository to the example-world seed and tests.

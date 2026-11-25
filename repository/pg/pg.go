@@ -15,15 +15,17 @@ import (
 	"time"
 
 	"github.com/hostryhq/go-auth"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
 	"github.com/hostryhq/go-common/outbox"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/hostryhq/svc-catalog/internal/gen"
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/repository"
 )
 
@@ -222,76 +224,59 @@ func (x *pgTx) LockProjection(ctx context.Context) error {
 	return err
 }
 
-func (x *pgTx) OpState(ctx context.Context, key string) (bool, bool, error) {
-	var voided bool
-	err := x.tx.QueryRowContext(ctx, `SELECT voided FROM ops WHERE tenant_id = $1 AND op_key = $2`, x.t, key).Scan(&voided)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, false, nil
-	}
-	return err == nil, voided, err
+// SyncStore implements repository.Tx: go-common's Postgres candidate store over this transaction, so the
+// projection commits with the inbox row. Its tables carry tenant_id and the same row-level security policy.
+func (x *pgTx) SyncStore() gsync.Store {
+	return tenantStore{PGStore: gsync.PGStore{DB: x.tx}, tenant: x.t.String()}
 }
 
-func (x *pgTx) PutOp(ctx context.Context, key, stream, intent string, voided bool, now time.Time) error {
-	_, err := x.tx.ExecContext(ctx, `INSERT INTO ops (tenant_id, op_key, stream, intent, voided, applied_at) VALUES ($1,$2,$3,$4,$5,$6)
-		ON CONFLICT (tenant_id, op_key) DO NOTHING`, x.t, key, stream, intent, voided, now.UTC())
-	return err
+// EmitEnqueue implements repository.Tx.
+func (x *pgTx) EmitEnqueue(ctx context.Context, ops ...emit.Op) error {
+	return emit.Enqueue(ctx, x.tx, time.Now().UTC(), x.t, ops...)
 }
 
-func (x *pgTx) VoidOp(ctx context.Context, key string, now time.Time) ([]repository.RowKey, error) {
-	if _, err := x.tx.ExecContext(ctx, `INSERT INTO ops (tenant_id, op_key, stream, intent, voided, applied_at) VALUES ($1,$2,'','',true,$3)
-		ON CONFLICT (tenant_id, op_key) DO UPDATE SET voided = true`, x.t, key, now.UTC()); err != nil {
-		return nil, err
-	}
-	rows, err := x.tx.QueryContext(ctx, `DELETE FROM effects WHERE tenant_id = $1 AND op_key = $2 RETURNING entity, row_id, stream, scope_id`, x.t, key)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []repository.RowKey
-	for rows.Next() {
-		var k repository.RowKey
-		if err := rows.Scan(&k.Entity, &k.ID, &k.Stream, &k.ScopeID); err != nil {
-			return nil, err
-		}
-		out = append(out, k)
-	}
-	return out, rows.Err()
+// tenantStore refuses a key of another tenant before it reaches SQL (the row-level security policy would
+// refuse it too).
+type tenantStore struct {
+	gsync.PGStore
+	tenant string
 }
 
-func (x *pgTx) AddEffects(ctx context.Context, fx []repository.EffectRec) error {
-	for _, e := range fx {
-		prev := e.Prev
-		if prev == nil {
-			prev = map[string]string{}
-		}
-		if _, err := x.tx.ExecContext(ctx, `INSERT INTO effects (tenant_id, entity, row_id, op_key, idx, stream, scope_id, hlc, origin, seq, kind, fields, prev)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,
-			x.t, e.Entity, e.RowID, e.Op, e.St.Idx, e.Stream, e.ScopeID, int64(e.St.HLC), e.St.Origin, e.St.Seq, e.Kind, mustJSON(e.F), mustJSON(prev)); err != nil {
-			return err
-		}
+var errForeignTenant = errors.New("pg: sync store used for another tenant")
+
+func (s tenantStore) AddCandidate(ctx context.Context, k gsync.RowKey, c gsync.Candidate) error {
+	if k.Tenant != s.tenant {
+		return errForeignTenant
 	}
-	return nil
+	return s.PGStore.AddCandidate(ctx, k, c)
 }
 
-func (x *pgTx) EffectsOf(ctx context.Context, k repository.RowKey) ([]proj.Effect, error) {
-	rows, err := x.tx.QueryContext(ctx, `SELECT op_key, idx, hlc, origin, seq, kind, fields, prev FROM effects
-		WHERE tenant_id = $1 AND entity = $2 AND row_id = $3`, x.t, k.Entity, k.ID)
-	if err != nil {
-		return nil, err
+func (s tenantStore) Candidates(ctx context.Context, k gsync.RowKey) ([]gsync.Candidate, error) {
+	if k.Tenant != s.tenant {
+		return nil, errForeignTenant
 	}
-	defer func() { _ = rows.Close() }()
-	var out []proj.Effect
-	for rows.Next() {
-		var e proj.Effect
-		var hlc int64
-		var f, p []byte
-		if err := rows.Scan(&e.Op, &e.St.Idx, &hlc, &e.St.Origin, &e.St.Seq, &e.Kind, &f, &p); err != nil {
-			return nil, err
-		}
-		e.St.HLC, e.F, e.Prev = uint64(hlc), decodeMap(f), decodeStrings(p)
-		out = append(out, e)
+	return s.PGStore.Candidates(ctx, k)
+}
+
+func (s tenantStore) RowsOfOp(ctx context.Context, tenant string, r gsync.OpRef) ([]gsync.RowKey, error) {
+	if tenant != s.tenant {
+		return nil, errForeignTenant
 	}
-	return out, rows.Err()
+	return s.PGStore.RowsOfOp(ctx, tenant, r)
+}
+
+func (s tenantStore) AddVoid(ctx context.Context, tenant string, r gsync.OpRef) error {
+	if tenant != s.tenant {
+		return errForeignTenant
+	}
+	return s.PGStore.AddVoid(ctx, tenant, r)
+}
+
+func (s tenantStore) Voided(ctx context.Context, tenant string, refs []gsync.OpRef) (map[gsync.OpRef]bool, error) {
+	if tenant != s.tenant {
+		return nil, errForeignTenant
+	}
+	return s.PGStore.Voided(ctx, tenant, refs)
 }
 
 func (x *pgTx) PutRow(ctx context.Context, r model.Row) error {
@@ -331,8 +316,8 @@ func scanRow(s rowScanner, entity, stream string) (model.Row, error) {
 }
 
 func streamOf(entity string) string {
-	if d, ok := proj.Entities[entity]; ok {
-		return d.Stream
+	if e, ok := gen.MustRegistry().Entities[entity]; ok {
+		return e.Stream
 	}
 	return model.StreamBrand
 }

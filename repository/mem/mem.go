@@ -14,29 +14,37 @@ import (
 	"time"
 
 	"github.com/hostryhq/go-auth"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 
 	"github.com/hostryhq/svc-catalog/internal/auditsink"
 	"github.com/hostryhq/svc-catalog/internal/model"
 	"github.com/hostryhq/svc-catalog/internal/nulldb"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/repository"
 )
 
 var errAuditDown = errors.New("mem: vendor access log unwritable")
 
 type rowKey struct{ entity, id string }
-type effKey struct{ entity, row, op string }
 type idemKey struct{ op, key string }
 type idemVal struct {
 	fp   string
 	resp []byte
 }
-type opRec struct {
-	stream, intent string
-	voided         bool
+
+// queued is one row of the in-memory emit_queue.
+type queued struct {
+	op   emit.Op
+	sent bool
+}
+
+// QueuedEmit is a queued op that has not been sent.
+type QueuedEmit struct {
+	Tenant ids.ID
+	Op     emit.Op
 }
 
 // VendorLogEntry is one vendor_access_log row.
@@ -45,8 +53,9 @@ type VendorLogEntry struct{ auth.VendorAccessEntry }
 // tenantState is everything one tenant owns.
 type tenantState struct {
 	outlets map[ids.ID]model.OutletRef
-	ops     map[string]opRec
-	effects map[effKey][]repository.EffectRec // all effects of one op on one row (one per mutation)
+	cands   map[gsync.RowKey][]gsync.Candidate // append-only per row; replaced, never mutated in place
+	voids   map[gsync.OpRef]bool
+	queue   []queued
 	rows    map[rowKey]model.Row
 	excs    map[string]model.Exception // by dedupe key
 	imports map[ids.ID]model.Import
@@ -58,7 +67,7 @@ type tenantState struct {
 }
 
 func newTenant() *tenantState {
-	return &tenantState{outlets: map[ids.ID]model.OutletRef{}, ops: map[string]opRec{}, effects: map[effKey][]repository.EffectRec{},
+	return &tenantState{outlets: map[ids.ID]model.OutletRef{}, cands: map[gsync.RowKey][]gsync.Candidate{}, voids: map[gsync.OpRef]bool{},
 		rows: map[rowKey]model.Row{}, excs: map[string]model.Exception{}, imports: map[ids.ID]model.Import{},
 		idem: map[idemKey]idemVal{}, keySeq: map[string]int64{}}
 }
@@ -81,12 +90,13 @@ func (t *tenantState) clone() *tenantState {
 	for k, v := range t.outlets {
 		c.outlets[k] = v
 	}
-	for k, v := range t.ops {
-		c.ops[k] = v
+	for k, v := range t.cands {
+		c.cands[k] = v // slices are append-only per key; replaced, never mutated in place
 	}
-	for k, v := range t.effects {
-		c.effects[k] = v // slices are append-only per key; replaced, never mutated in place
+	for k, v := range t.voids {
+		c.voids[k] = v
 	}
+	c.queue = append([]queued(nil), t.queue...)
 	for k, v := range t.rows {
 		c.rows[k] = v // rows are replaced, never mutated in place
 	}
@@ -277,55 +287,99 @@ func (t *tx) BrandsOf(ctx context.Context, scope auth.OutletScope) ([]ids.ID, er
 
 func (t *tx) LockProjection(context.Context) error { return nil } // transactions are serialised
 
-func (t *tx) OpState(_ context.Context, key string) (bool, bool, error) {
-	o, ok := t.st.ops[key]
-	return ok, o.voided, nil
-}
+// SyncStore implements repository.Tx: the candidates and void set of the tenant, inside the transaction.
+func (t *tx) SyncStore() gsync.Store { return memSync{t.st} }
 
-func (t *tx) PutOp(_ context.Context, key, stream, intent string, voided bool, _ time.Time) error {
-	t.st.ops[key] = opRec{stream: stream, intent: intent, voided: voided}
+type memSync struct{ st *tenantState }
+
+func (m memSync) AddCandidate(_ context.Context, k gsync.RowKey, c gsync.Candidate) error {
+	cur := m.st.cands[k]
+	for _, e := range cur {
+		if e.Ref == c.Ref && e.Idx == c.Idx {
+			return nil // idempotent: the same (op, mutation index) is recorded once
+		}
+	}
+	m.st.cands[k] = append(append([]gsync.Candidate(nil), cur...), c)
 	return nil
 }
 
-func (t *tx) VoidOp(_ context.Context, key string, _ time.Time) ([]repository.RowKey, error) {
-	o := t.st.ops[key]
-	o.voided = true
-	t.st.ops[key] = o
-	var touched []repository.RowKey
-	for k, recs := range t.st.effects {
-		if k.op != key {
-			continue
-		}
-		touched = append(touched, repository.RowKey{Entity: recs[0].Entity, ID: recs[0].RowID, Stream: recs[0].Stream, ScopeID: recs[0].ScopeID})
-		delete(t.st.effects, k)
-	}
-	sort.Slice(touched, func(i, j int) bool {
-		if touched[i].Entity != touched[j].Entity {
-			return touched[i].Entity < touched[j].Entity
-		}
-		return touched[i].ID < touched[j].ID
-	})
-	return touched, nil
+func (m memSync) Candidates(_ context.Context, k gsync.RowKey) ([]gsync.Candidate, error) {
+	return append([]gsync.Candidate(nil), m.st.cands[k]...), nil
 }
 
-func (t *tx) AddEffects(_ context.Context, fx []repository.EffectRec) error {
-	for _, e := range fx {
-		k := effKey{e.Entity, e.RowID, e.Op}
-		t.st.effects[k] = append(append([]repository.EffectRec(nil), t.st.effects[k]...), e)
-	}
-	return nil
-}
-
-func (t *tx) EffectsOf(_ context.Context, rk repository.RowKey) ([]proj.Effect, error) {
-	var out []proj.Effect
-	for k, recs := range t.st.effects {
-		if k.entity == rk.Entity && k.row == rk.ID {
-			for _, r := range recs {
-				out = append(out, r.Effect)
+func (m memSync) RowsOfOp(_ context.Context, _ string, r gsync.OpRef) ([]gsync.RowKey, error) {
+	var out []gsync.RowKey
+	for k, cs := range m.st.cands {
+		for _, c := range cs {
+			if c.Ref == r {
+				out = append(out, k)
+				break
 			}
 		}
 	}
 	return out, nil
+}
+
+func (m memSync) AddVoid(_ context.Context, _ string, r gsync.OpRef) error {
+	m.st.voids[r] = true
+	return nil
+}
+
+func (m memSync) Voided(_ context.Context, _ string, refs []gsync.OpRef) (map[gsync.OpRef]bool, error) {
+	out := map[gsync.OpRef]bool{}
+	for _, r := range refs {
+		if m.st.voids[r] {
+			out[r] = true
+		}
+	}
+	return out, nil
+}
+
+// EmitEnqueue implements repository.Tx: an op whose key is already queued is ignored.
+func (t *tx) EmitEnqueue(_ context.Context, ops ...emit.Op) error {
+	for _, o := range ops {
+		if err := o.Validate(); err != nil {
+			return err
+		}
+		dup := false
+		for _, q := range t.st.queue {
+			dup = dup || q.op.Key == o.Key
+		}
+		if !dup {
+			t.st.queue = append(t.st.queue, queued{op: o})
+		}
+	}
+	return nil
+}
+
+// PendingEmits returns the queued ops that were not sent, per tenant in enqueue order (the double's worker).
+func (s *Store) PendingEmits() []QueuedEmit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []QueuedEmit
+	for tid, ts := range s.tenants {
+		for _, q := range ts.queue {
+			if !q.sent {
+				out = append(out, QueuedEmit{Tenant: tid, Op: q.op})
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Tenant < out[j].Tenant })
+	return out
+}
+
+// MarkEmitted marks the queued op as sent.
+func (s *Store) MarkEmitted(tenant ids.ID, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ts := s.tenant(tenant)
+	q := append([]queued(nil), ts.queue...)
+	for i := range q {
+		if q[i].op.Key == key {
+			q[i].sent = true
+		}
+	}
+	ts.queue = q
 }
 
 func (t *tx) PutRow(_ context.Context, r model.Row) error {

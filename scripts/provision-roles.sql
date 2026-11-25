@@ -7,7 +7,7 @@
 --
 --   catalog_migrator  owns the database and its tables; runs migrations only (never at serve time)
 --   catalog_app       DML only, NOSUPERUSER NOBYPASSRLS, not an owner (the service's runtime role)
---   catalog_relay     the outbox table only (relay to the bus)
+--   catalog_relay     the outbox table (relay to the bus) and the emit_queue table (the emit worker drains every tenant's rows)
 
 SELECT format('CREATE ROLE catalog_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB PASSWORD %L', :'migrator_password')
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'catalog_migrator') \gexec

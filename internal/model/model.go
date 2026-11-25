@@ -126,21 +126,25 @@ type PlanVariant struct {
 	Default    bool   `json:"default"`
 	Sort       int    `json:"sort"`
 	Exists     bool   `json:"exists"` // an existing variant matched by name: its price is a price edit
+	// PriceChanged: the existing price differs from the file's.
+	PriceChanged bool `json:"price_changed,omitempty"`
 }
 
 // PlanItem is one item of the plan.
 type PlanItem struct {
-	ID         string        `json:"id"`
-	Exists     bool          `json:"exists"`
-	Code       string        `json:"code,omitempty"`
-	NameEn     string        `json:"name_en"`
-	KitchenEn  string        `json:"kitchen_name"`
-	CategoryID string        `json:"category_id"`
-	Station    string        `json:"station,omitempty"`
-	VegMark    string        `json:"veg_mark"`
-	TaxClass   string        `json:"tax_class"`
-	Sort       int           `json:"sort"`
-	Variants   []PlanVariant `json:"variants"`
+	ID     string `json:"id"`
+	Exists bool   `json:"exists"`
+	// NameChanged: an existing item whose English name the import changes (a change of an existing item).
+	NameChanged bool          `json:"name_changed,omitempty"`
+	Code        string        `json:"code,omitempty"`
+	NameEn      string        `json:"name_en"`
+	KitchenEn   string        `json:"kitchen_name"`
+	CategoryID  string        `json:"category_id"`
+	Station     string        `json:"station,omitempty"`
+	VegMark     string        `json:"veg_mark"`
+	TaxClass    string        `json:"tax_class"`
+	Sort        int           `json:"sort"`
+	Variants    []PlanVariant `json:"variants"`
 }
 
 // PlanCategory is one category of the plan.

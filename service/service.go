@@ -17,13 +17,15 @@ import (
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/apperr"
 	"github.com/hostryhq/go-common/clock"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/idempotency"
 	"github.com/hostryhq/go-common/ids"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/tenancy"
 
+	"github.com/hostryhq/svc-catalog/internal/gen"
 	"github.com/hostryhq/svc-catalog/internal/model"
-	"github.com/hostryhq/svc-catalog/internal/proj"
 	"github.com/hostryhq/svc-catalog/repository"
 )
 
@@ -41,35 +43,24 @@ const (
 // (see docs/notes.md).
 var DefaultTaxClasses = []string{"fnb_standard", "fnb_non_gst", "exempt"}
 
-// Emission is one op catalog asks the gateway to record for the tenant (the emit API, ADR-0002 S11).
-type Emission struct {
-	// Stream is "brand:<id>" or "outlet:<id>".
-	Stream string
-	Intent string
-	// Key makes a retry harmless: the gateway must treat the same key as the same op. Empty means none.
-	Key  string
-	Muts []proj.Mut
+// OpID is the identity of a stored op as the API reports it: "<origin>/<stream>/<seq>".
+func OpID(r emit.Result) string {
+	return r.Origin + "/" + r.Stream + "/" + strconv.FormatInt(r.Seq, 10)
 }
 
-// Emitted is what the gateway returns: the identity of the recorded op, "<origin>/<stream>/<seq>".
-type Emitted struct{ OpID string }
-
-// Emitter is the gateway emit API (a generated client once api-specs publishes it; see docs/notes.md). The
-// double supplies a loopback that records the op and feeds it back through the projection, as the bus would.
-type Emitter interface {
-	Emit(ctx context.Context, tenant ids.ID, e Emission) (Emitted, error)
-}
-
-// ErrEmitUnavailable is the answer when no emitter is configured or the gateway fails.
-var ErrEmitUnavailable = apperr.New(apperr.Unavailable, "emit_unavailable", "the sync gateway is not reachable; try again")
+// IDSource mints the ids of rows catalog creates. *ids.Generator is one; the double and the example-world tests
+// use a source that hands out the ids of the spec examples first (seed.IDs).
+type IDSource interface{ New() ids.ID }
 
 // Service is the catalog business layer.
 type Service struct {
 	repo       repository.Repository
 	clock      clock.Clock
-	gen        *ids.Generator
+	gen        IDSource
 	log        *slog.Logger
-	emitter    Emitter
+	emitter    emit.Emitter
+	reg        *gsync.Registry
+	parser     gsync.Parser
 	taxClasses []string
 	// importBatch is how many items go into one emitted op.
 	importBatch int
@@ -77,10 +68,13 @@ type Service struct {
 
 // Options configure a Service. Zero values pick production defaults.
 type Options struct {
-	Clock      clock.Clock
-	IDs        *ids.Generator
-	Log        *slog.Logger
-	Emitter    Emitter
+	Clock clock.Clock
+	IDs   IDSource // default: a UUIDv7 generator on the clock
+	Log   *slog.Logger
+	// Emitter is the gateway emit client for interactive edits (nil: they answer 503 emit.unavailable). Queued
+	// emissions (menu import) go through emit_queue and need no emitter here.
+	Emitter    emit.Emitter
+	Registry   *gsync.Registry // default: the embedded entity registry
 	TaxClasses []string
 	// ImportBatch is the number of items per emitted op (default 50).
 	ImportBatch int
@@ -88,7 +82,10 @@ type Options struct {
 
 // New builds a Service over repo.
 func New(repo repository.Repository, o Options) *Service {
-	s := &Service{repo: repo, clock: o.Clock, gen: o.IDs, log: o.Log, emitter: o.Emitter, taxClasses: o.TaxClasses, importBatch: o.ImportBatch}
+	s := &Service{repo: repo, clock: o.Clock, gen: o.IDs, log: o.Log, emitter: o.Emitter, reg: o.Registry, taxClasses: o.TaxClasses, importBatch: o.ImportBatch}
+	if s.reg == nil {
+		s.reg = gen.MustRegistry()
+	}
 	if s.clock == nil {
 		s.clock = clock.System
 	}
@@ -107,8 +104,8 @@ func New(repo repository.Repository, o Options) *Service {
 	return s
 }
 
-// SetEmitter wires the gateway emit client after construction (the double builds the loopback from the service).
-func (s *Service) SetEmitter(e Emitter) { s.emitter = e }
+// SetEmitter wires the gateway emit client after construction (the double builds its gateway from the service).
+func (s *Service) SetEmitter(e emit.Emitter) { s.emitter = e }
 
 // Idem identifies one idempotent request: the operation, the client's key and the request fingerprint.
 type Idem struct{ Op, Key, Fingerprint string }

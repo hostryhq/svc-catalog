@@ -9,6 +9,7 @@ import (
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/clock"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/events"
 	"github.com/hostryhq/go-common/health"
 	"github.com/hostryhq/go-common/ids"
@@ -32,10 +33,10 @@ type Options struct {
 
 	Clock     clock.Clock // entity timestamps and ids
 	AuthClock clock.Clock // token checks; defaults to Clock
-	IDs       *ids.Generator
+	IDs       service.IDSource
 	Log       *slog.Logger
-	Emitter   service.Emitter
-	Fetcher   service.OpBodyFetcher
+	// Emitter is the gateway emit client for interactive cloud-side edits (nil: they answer 503 emit.unavailable).
+	Emitter emit.Emitter
 	// TaxClasses are the tax classes an owner may choose (default: the Phase 2 classes).
 	TaxClasses []string
 }
@@ -81,7 +82,7 @@ func Build(o Options) (*App, error) {
 			if err != nil {
 				return err
 			}
-			return svc.ApplyEvent(ctx, rtx, env, o.Fetcher)
+			return svc.ApplyEvent(ctx, rtx, env)
 		},
 	}, nil
 }

@@ -7,7 +7,10 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/x509"
 	"database/sql"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/bus"
+	"github.com/hostryhq/go-common/emit"
 	"github.com/hostryhq/go-common/inbox"
 	"github.com/hostryhq/go-common/logx"
 	"github.com/hostryhq/go-common/outbox"
@@ -116,9 +120,17 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 	go keys.Run(ctx, cfg.KeyRefresh)
 
-	// No emitter and no body fetcher are wired: the gateway's emit API and an op-body read are not in api-specs
-	// yet (docs/notes.md, "ADR needed"). Cloud-side writes answer 503 emit_unavailable until they are, and an
-	// op event that carries no body is parked after its retries.
+	// The gateway emit client (ADR-0014 A2.2): interactive edits call it, and the emit_queue worker below drains
+	// queued emissions with it. Without CATALOG_SYNC_URL and the signing key, edits answer 503 emit.unavailable
+	// and queued emissions wait.
+	ec, err := emitClient(cfg)
+	if err != nil {
+		return err
+	}
+	var emitter emit.Emitter
+	if ec != nil {
+		emitter = ec
+	}
 	var svcVerifier *auth.ServiceVerifier
 	if cfg.ServiceKeys != "" {
 		doc, err := keyLoader{cfg.ServiceKeys}.Load(ctx)
@@ -127,13 +139,16 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		}
 		svcVerifier = &auth.ServiceVerifier{Registry: auth.NewStaticKeySet(doc), Self: "catalog"}
 	}
-	a, err := app.Build(app.Options{AppDB: appDB, Log: log, TaxClasses: cfg.TaxClasses, Services: svcVerifier,
+	a, err := app.Build(app.Options{AppDB: appDB, Log: log, TaxClasses: cfg.TaxClasses, Services: svcVerifier, Emitter: emitter,
 		Tenant: &auth.Verifier{Keys: keys, Issuer: cfg.TenantIssuer, Audience: cfg.TenantAudience, Realm: auth.RealmTenant}})
 	if err != nil {
 		return err
 	}
 	if cfg.NatsURL != "" && cfg.RelayDSN != "" {
 		go relay(ctx, cfg, log)
+		if ec != nil {
+			go emitWorker(ctx, cfg, ec, log)
+		}
 		go consume(ctx, cfg, appDB, a, log)
 	} else {
 		log.Warn("bus disabled: NATS_URL or CATALOG_DB_RELAY_DSN not set; events stay in the outbox and nothing is consumed")
@@ -182,8 +197,58 @@ func relay(ctx context.Context, cfg config.Config, log *slog.Logger) {
 	}
 }
 
-// consume runs one strict-order inbox subscriber per publisher catalog reads: the gateway's op events and
-// tenancy's outlet events (ADR-0011 B5, B10).
+// emitClient builds the gateway emit client, or nil when it is not configured. The service token is signed per
+// call with this service's key (a deploy secret, read from a file by reference, never logged).
+func emitClient(cfg config.Config) (*emit.Client, error) {
+	if cfg.SyncURL == "" {
+		return nil, nil
+	}
+	if cfg.ServiceSigningKey == "" {
+		return nil, errors.New("CATALOG_SERVICE_SIGNING_KEY is required with CATALOG_SYNC_URL")
+	}
+	raw, err := os.ReadFile(cfg.ServiceSigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("read service signing key: %w", err)
+	}
+	blk, _ := pem.Decode(raw)
+	if blk == nil {
+		return nil, errors.New("service signing key is not PEM")
+	}
+	key, err := x509.ParseECPrivateKey(blk.Bytes)
+	if err != nil {
+		k, perr := x509.ParsePKCS8PrivateKey(blk.Bytes)
+		ek, ok := k.(*ecdsa.PrivateKey)
+		if perr != nil || !ok {
+			return nil, errors.New("service signing key is not an EC private key")
+		}
+		key = ek
+	}
+	signer := &auth.ServiceSigner{Name: "catalog", Key: key}
+	return &emit.Client{BaseURL: cfg.SyncURL, Token: func(context.Context) (string, error) { return signer.Sign("sync", "") },
+		HTTP: &http.Client{Timeout: 10 * time.Second}}, nil
+}
+
+// emitWorker drains emit_queue (queued emissions: menu import commits) as the relay role, which sees every
+// tenant's rows of that table only. Rows are sent in order per tenant with back-off while the gateway is down.
+func emitWorker(ctx context.Context, cfg config.Config, c *emit.Client, log *slog.Logger) {
+	db, err := pg.Open(cfg.RelayDSN, 2)
+	if err != nil {
+		log.Error("emit worker: open database", "error", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+	if err := pg.VerifyRuntimeRole(ctx, db); err != nil {
+		log.Error("emit worker: refusing to start", "error", err)
+		return
+	}
+	q := &emit.Queue{DB: db, Emitter: c, Log: log}
+	if err := q.Run(ctx, 2*time.Second); err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("emit worker stopped", "error", err)
+	}
+}
+
+// consume runs one inbox subscriber per publisher catalog reads: the gateway's op events and tenancy's outlet
+// events (ADR-0011 B5, B10; no order is needed for sync ops, ADR-0014 A2.1 item 5).
 func consume(ctx context.Context, cfg config.Config, db *sql.DB, a *app.App, log *slog.Logger) {
 	nc, err := bus.Connect(cfg.NatsURL, "catalog", cfg.NatsSeedFile)
 	if err != nil {
