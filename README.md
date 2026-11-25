@@ -2,7 +2,8 @@
 
 Catalog service: menus, items, variants, modifiers, item tax classes, stations, floors, tables, printers, reason codes and the
 CSV menu import (ADR-0014). Devices write these masters as sync ops; catalog projects them from the bus into its own database,
-serves them over a read API, and writes cloud-side changes (tax class, menu import) back as ops through the gateway emit API.
+serves them over a read API, and writes cloud-side changes (tax class, menu import) back as ops through the gateway emit API
+(go-common `emit` client; menu import commits go through the `emit_queue` outbox).
 Contract: `api-specs/openapi/catalog/v1` (the commit used is in `internal/gen/SPEC_VERSION`); entity schemas and owners in
 `api-specs/entities/restaurant`. Status of every operation: [docs/operations-status.md](docs/operations-status.md). Conservative
 choices, open questions and spec problems: [docs/notes.md](docs/notes.md). No deployment exists yet (ADR-0001 AM12).
@@ -15,10 +16,10 @@ api/                    controllers: go-auth guard, strict JSON, Idempotency-Key
 service/                business rules: reads, projection of ops, tax-class edits, menu import; no HTTP, no SQL
 repository/            interfaces; pg/ (Postgres, row-level security), mem/ (in memory), migrations/ (forward-only SQL)
 events/                 domain events written to the transactional outbox
-double/                 in-memory test double: the real api + service over repository/mem; loopback gateway; failure injection
-internal/proj/          conflict policy of the 17 owned entities and the op decoder
-internal/gen/          generated: oapi-codegen types and server, policy table, permission catalogue (make gen)
-internal/seed/          the example worlds of the OpenAPI document (base, import-previewed, price-conflict)
+double/                 in-memory test double: the real api + service over repository/mem; in-process gateway fake; failure injection
+internal/fakegw/        in-process fake of the gateway's POST /internal/v1/emit (real endpoint not built yet), used by the double and the integration tests
+internal/gen/          generated: oapi-codegen types and server, policy table, permission catalogue, entity registry and cloud intents (make gen)
+internal/seed/          the example worlds of the OpenAPI document (base, menu-empty, import-previewed, price-conflict)
 internal/httpsuite/     HTTP suites run against both the real service and the double
 internal/projsuite/     service-level projection and outlet-scope (T14) suites, run over memory and Postgres
 ```
@@ -34,12 +35,13 @@ Configuration is environment only; the process fails fast and lists every proble
 | `CATALOG_DB_MIGRATE_DSN` | the migrator, used only by `catalog migrate` |
 | `CATALOG_TENANT_JWKS` | JWKS document (URL or file) of the tenant token issuer (required) |
 | `CATALOG_SERVICE_KEYS` | service key registry (JWKS, kid = service name); needed only to accept support sessions |
+| `CATALOG_SYNC_URL`, `CATALOG_SERVICE_SIGNING_KEY` | the gateway (its internal emit operation) and the path of this service's EC private key (PEM) that signs service tokens; both unset means no emitter: tax-class edits answer 503 `emit.unavailable` and queued emissions wait. The `emit_queue` worker runs as `catalog_relay` (`CATALOG_DB_RELAY_DSN`) |
 | `CATALOG_TAX_CLASSES` | tax classes an owner may choose (default `fnb_standard,fnb_non_gst,exempt`) |
 
 DSNs and key files are secrets: pass them by reference from the secret store, never inline. Roles are provisioned once per
 cluster by `scripts/provision-roles.sql`; `catalog migrate` then applies `repository/migrations`. At start-up the service refuses
-to run as a superuser, a `BYPASSRLS` role or a table owner. The gateway emit client is not wired yet (docs/notes.md), so tax-class
-edits and import commits answer 503 `emit_unavailable` in a real process.
+to run as a superuser, a `BYPASSRLS` role or a table owner. The gateway's emit operation is not built yet; until it is, run
+against the fake (`internal/fakegw`), which the integration tests do.
 
 ```
 catalog migrate     # as the migrator role
