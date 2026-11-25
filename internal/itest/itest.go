@@ -76,7 +76,7 @@ func New(t testing.TB) *Stack {
 	clk.Set(seed.At)
 	tk := double.NewTokens()
 	lb := &Loopback{Clock: clk}
-	a, err := app.Build(app.Options{AppDB: db.App, Tenant: tk.TenantIssuer.Verifier(), Clock: clk, AuthClock: clock.System,
+	a, err := app.Build(app.Options{AppDB: db.App, Tenant: tk.TenantIssuer.Verifier(), Services: tk.Registry.Verifier("catalog"), Clock: clk, AuthClock: clock.System,
 		IDs: ids.NewGenerator(clk.Now, nil), Log: slog.New(slog.DiscardHandler), Emitter: lb})
 	if err != nil {
 		t.Fatal(err)

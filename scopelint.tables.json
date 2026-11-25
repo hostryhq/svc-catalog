@@ -1,0 +1,13 @@
+{
+  "outlets": "outlet_scoped",
+  "outlet_rows": "outlet_scoped",
+  "exceptions": "outlet_scoped",
+  "brand_rows": "tenant_wide",
+  "ops": "tenant_wide",
+  "effects": "tenant_wide",
+  "menu_imports": "tenant_wide",
+  "audit_log": "tenant_wide",
+  "vendor_access_log": "tenant_wide",
+  "idempotency_keys": "tenant_wide",
+  "event_keys": "tenant_wide"
+}

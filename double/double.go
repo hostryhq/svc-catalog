@@ -32,7 +32,8 @@ import (
 
 // Config configures the double. Tenant is required; the rest has defaults.
 type Config struct {
-	Tenant *auth.Verifier // tenant-realm tokens (authtest.NewTenantIssuer(...).Verifier())
+	Tenant   *auth.Verifier        // tenant-realm tokens (authtest.NewTenantIssuer(...).Verifier())
+	Services *auth.ServiceVerifier // service tokens; support sessions travel with the admin service token (nil: refused)
 	// Clock defaults to a fixed instant, the instant of the spec examples.
 	Clock clock.Clock
 	// IDs defaults to a generator driven by Clock with a counter, so ids are deterministic.
@@ -90,7 +91,7 @@ func New(cfg Config) (*Double, error) {
 	if !cfg.NoEmitter {
 		svc.SetEmitter(d)
 	}
-	guard := &auth.Guard{Catalogue: cat, Tenant: cfg.Tenant, Audit: store, Log: log}
+	guard := &auth.Guard{Catalogue: cat, Tenant: cfg.Tenant, Services: cfg.Services, Audit: store, Log: log}
 	d.h = api.New(api.Config{Service: svc, Guard: guard, Clock: cfg.Clock, Log: log})
 	return d, nil
 }
@@ -224,3 +225,8 @@ func (d *Double) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Server starts the double on an httptest server.
 func (d *Double) Server() *httptest.Server { return httptest.NewServer(d) }
+
+// Load adds an organisation's named example world without resetting what is there (isolation tests).
+func (d *Double) Load(ctx context.Context, w seed.World, world string) error {
+	return w.Apply(ctx, d.Svc, world)
+}

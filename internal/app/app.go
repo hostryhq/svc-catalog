@@ -27,7 +27,8 @@ import (
 type Options struct {
 	AppDB *sql.DB // runtime pool as catalog_app
 
-	Tenant *auth.Verifier
+	Tenant   *auth.Verifier
+	Services *auth.ServiceVerifier // optional: without it support sessions are refused
 
 	Clock     clock.Clock // entity timestamps and ids
 	AuthClock clock.Clock // token checks; defaults to Clock
@@ -69,7 +70,7 @@ func Build(o Options) (*App, error) {
 	}
 	repo := pg.New(o.AppDB)
 	svc := service.New(repo, service.Options{Clock: o.Clock, IDs: o.IDs, Log: o.Log, Emitter: o.Emitter, TaxClasses: o.TaxClasses})
-	guard := &auth.Guard{Catalogue: cat, Tenant: o.Tenant, Clock: o.AuthClock, Log: o.Log, Audit: &pg.AuditSink{DB: o.AppDB, Log: o.Log}}
+	guard := &auth.Guard{Catalogue: cat, Tenant: o.Tenant, Services: o.Services, Clock: o.AuthClock, Log: o.Log, Audit: &pg.AuditSink{DB: o.AppDB, Log: o.Log}}
 	h := health.New(0)
 	h.Add("postgres", repo.Ping)
 	return &App{

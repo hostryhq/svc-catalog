@@ -18,6 +18,9 @@ type Config struct {
 	// MigrateDSN connects as the migrator; used only by `catalog migrate`.
 	MigrateDSN string
 	// TenantJWKS is the JWKS document (URL or file path) of the tenant token issuer.
+	// ServiceKeys is the service key registry (a JWKS file whose kid is the service name); optional. Without
+	// it support sessions (which travel with the admin service token) are refused.
+	ServiceKeys                  string
 	TenantJWKS                   string
 	TenantIssuer, TenantAudience string
 	// TaxClasses are the tax classes an owner may choose; the rule set in force is billing's data.
@@ -39,6 +42,7 @@ func Load(lookup config.Lookup) (Config, error) {
 		TenantJWKS:     l.Required("CATALOG_TENANT_JWKS"),
 		TenantIssuer:   l.String("CATALOG_TENANT_ISSUER", "hostry-identity"),
 		TenantAudience: l.String("CATALOG_TENANT_AUDIENCE", "hostry-tenant"),
+		ServiceKeys:    l.String("CATALOG_SERVICE_KEYS", ""),
 		NatsURL:        l.String("NATS_URL", ""),
 		NatsSeedFile:   l.String("NATS_SEED_FILE", ""),
 		KeyRefresh:     l.Duration("CATALOG_KEY_REFRESH", time.Minute),

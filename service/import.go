@@ -173,7 +173,7 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 	}
 	existing := map[string]model.Row{} // by item code
 	variants := map[string][]model.Row{}
-	prices := map[string]int64{} // item|variant
+	prices := map[string]model.Row{} // item|variant -> existing price row
 	if len(codes) > 0 {
 		items, err := tx.ListRows(ctx, repository.RowQuery{Entity: "item", Brands: brands, In: map[string][]string{"code": codes}})
 		if err != nil {
@@ -198,7 +198,7 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 				return nil, nil, counts, err
 			}
 			for _, p := range ps {
-				prices[p.Str("item_id")+"|"+p.Str("variant_id")] = p.Int("price_paise")
+				prices[p.Str("item_id")+"|"+p.Str("variant_id")] = p
 			}
 		}
 	}
@@ -242,8 +242,11 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 				for _, ev := range variants[it.ID] {
 					if lower(ev.Str("name")) == lower(pv.Name) {
 						pv.ID, pv.Exists = ev.ID, true
-						if cur, ok := prices[it.ID+"|"+ev.ID]; ok && cur != paise {
-							counts.priceChanges++
+						if cur, ok := prices[it.ID+"|"+ev.ID]; ok {
+							pv.PriceID = cur.ID // the existing row, whatever its id
+							if cur.Int("price_paise") != paise {
+								counts.priceChanges++
+							}
 						}
 					}
 				}
@@ -251,7 +254,9 @@ func (s *Service) buildPlan(ctx context.Context, tx repository.Tx, brand ids.ID,
 			if pv.ID == "" {
 				pv.ID = s.newID().String()
 			}
-			pv.PriceID = uuid5.PriceEntry(it.ID, pv.ID)
+			if pv.PriceID == "" {
+				pv.PriceID = uuid5.PriceEntry(it.ID, pv.ID)
+			}
 			it.Variants = append(it.Variants, pv)
 		}
 		plan.Items = append(plan.Items, it)

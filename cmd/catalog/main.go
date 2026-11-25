@@ -119,7 +119,15 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	// No emitter and no body fetcher are wired: the gateway's emit API and an op-body read are not in api-specs
 	// yet (docs/notes.md, "ADR needed"). Cloud-side writes answer 503 emit_unavailable until they are, and an
 	// op event that carries no body is parked after its retries.
-	a, err := app.Build(app.Options{AppDB: appDB, Log: log, TaxClasses: cfg.TaxClasses,
+	var svcVerifier *auth.ServiceVerifier
+	if cfg.ServiceKeys != "" {
+		doc, err := keyLoader{cfg.ServiceKeys}.Load(ctx)
+		if err != nil {
+			return fmt.Errorf("load service keys: %w", err)
+		}
+		svcVerifier = &auth.ServiceVerifier{Registry: auth.NewStaticKeySet(doc), Self: "catalog"}
+	}
+	a, err := app.Build(app.Options{AppDB: appDB, Log: log, TaxClasses: cfg.TaxClasses, Services: svcVerifier,
 		Tenant: &auth.Verifier{Keys: keys, Issuer: cfg.TenantIssuer, Audience: cfg.TenantAudience, Realm: auth.RealmTenant}})
 	if err != nil {
 		return err
