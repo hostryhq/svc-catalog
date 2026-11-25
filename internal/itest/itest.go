@@ -81,7 +81,7 @@ func New(t testing.TB) *Stack {
 	}
 	gsrv := httptest.NewServer(gw)
 	t.Cleanup(gsrv.Close)
-	client := &emit.Client{BaseURL: gsrv.URL, Token: func(context.Context) (string, error) { return "test-service-token", nil }}
+	client := &emit.Client{BaseURL: gsrv.URL, Token: func(context.Context, ids.ID) (string, error) { return "test-service-token", nil }}
 	var skew skewClock
 	idsrc := seed.NewIDs(ids.NewGenerator(clk.Now, nil))
 	a, err := app.Build(app.Options{AppDB: db.App, Tenant: tk.TenantIssuer.Verifier(), Services: tk.Registry.Verifier("catalog"), Clock: clk, AuthClock: clock.System,

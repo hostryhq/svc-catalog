@@ -84,11 +84,8 @@ func (rt *router) HandleFunc(pattern string, h func(http.ResponseWriter, *http.R
 	if !ok {
 		panic("api: no policy generated for " + pattern)
 	}
-	pol := auth.Policy{OperationID: p.OperationID, Permission: p.Permission, StepUp: p.StepUp}
-	var handler http.Handler = rt.cfg.Guard.Wrap(pol, http.HandlerFunc(h))
-	if p.StepUp {
-		handler = strongHint(handler)
-	}
+	pol := auth.Policy{OperationID: p.OperationID, Permission: p.Permission, StepUp: p.StepUp, WidenedBy: p.WidenedBy}
+	handler := rt.cfg.Guard.Wrap(pol, http.HandlerFunc(h))
 	rt.mux.Handle(pattern, handler)
 }
 

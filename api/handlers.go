@@ -201,7 +201,7 @@ func (s *Server) setTax(w http.ResponseWriter, r *http.Request, rawID, op string
 	s.reply(w, r, http.StatusOK, gen.TaxClassChange{Id: c.ID, TaxClass: c.TaxClass, UpdatedAt: c.UpdatedAt, OpId: c.OpID}, err)
 }
 
-func (s *Server) CreateMenuImport(w http.ResponseWriter, r *http.Request, _ gen.CreateMenuImportParams) {
+func (s *Server) CreateMenuImport(w http.ResponseWriter, r *http.Request, p gen.CreateMenuImportParams) {
 	var in gen.CreateMenuImport
 	ctx, ok := s.begin(w, r, "createMenuImport", &in)
 	if !ok {
@@ -216,9 +216,11 @@ func (s *Server) CreateMenuImport(w http.ResponseWriter, r *http.Request, _ gen.
 		}
 		brand = b
 	}
-	// The operation does not declare X-Outlet-Id (spec problem, docs/notes.md) but its description gives the
-	// header the meaning "the brand of this outlet"; it is read like the header of every scoped operation.
-	im, err := s.svc.CreateMenuImport(ctx, in.Filename, in.CsvText, brand, r.Header.Get("X-Outlet-Id"))
+	outlet := ""
+	if p.XOutletId != nil {
+		outlet = string(*p.XOutletId)
+	}
+	im, err := s.svc.CreateMenuImport(ctx, in.Filename, in.CsvText, brand, outlet)
 	s.reply(w, r, http.StatusCreated, importDTO(im), err)
 }
 

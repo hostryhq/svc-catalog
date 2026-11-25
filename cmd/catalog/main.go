@@ -24,6 +24,7 @@ import (
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-common/bus"
 	"github.com/hostryhq/go-common/emit"
+	"github.com/hostryhq/go-common/ids"
 	"github.com/hostryhq/go-common/inbox"
 	"github.com/hostryhq/go-common/logx"
 	"github.com/hostryhq/go-common/outbox"
@@ -224,7 +225,7 @@ func emitClient(cfg config.Config) (*emit.Client, error) {
 		key = ek
 	}
 	signer := &auth.ServiceSigner{Name: "catalog", Key: key}
-	return &emit.Client{BaseURL: cfg.SyncURL, Token: func(context.Context) (string, error) { return signer.Sign("sync", "") },
+	return &emit.Client{BaseURL: cfg.SyncURL, Token: func(_ context.Context, tenant ids.ID) (string, error) { return signer.Sign("sync", tenant.String()) },
 		HTTP: &http.Client{Timeout: 10 * time.Second}}, nil
 }
 

@@ -64,3 +64,4 @@ func TestRealTaxClass(t *testing.T)      { httpsuite.TaxClass(t, factory) }
 func TestRealImport(t *testing.T)        { httpsuite.Import(t, factory) }
 func TestRealOutage(t *testing.T)        { httpsuite.Outage(t, factory) }
 func TestRealImportBrand(t *testing.T)   { httpsuite.ImportBrand(t, factory) }
+func TestRealSupportImport(t *testing.T) { httpsuite.SupportImport(t, factory) }

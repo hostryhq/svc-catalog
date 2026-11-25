@@ -132,3 +132,4 @@ written_by_intents:
 - settings.outlet.edit
 - settings.numbering.set
 - settings.discount_limit.set
+- settings.tax_profile.set

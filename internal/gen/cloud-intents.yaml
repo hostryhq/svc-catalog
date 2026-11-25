@@ -30,6 +30,28 @@ intents:
   - sync_void
   idempotency: The record id is stream|origin|seq of the refused op; a replayed void adds the same op to the void set again,
     which is a no-op.
+- intent: sync.pii.erase
+  intent_v: 1
+  class: control
+  owner: gateway
+  description: "The gateway erases the personal data of one earlier op on every node (security ruling SR-2, O2-8). Origin cloud-<epoch>, sealed like any cloud-origin op; one mutation of the protocol record pii_erase naming the target op. Each node removes the stored values AND salts of the target op from its rows, op log, caches and spool and discards any later arrival of that op's pii; the commitments (body.pii_c) stay in the sealed body. A node acknowledges in the pii_erased field of its next direct cloud hello."
+  permission: null
+  permission_reason: "Cloud-origin op written by the gateway when an authorised erasure is requested online; no device or person records it."
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  - brand
+  - tenant
+  numbering: none
+  entities: {}
+  records:
+  - pii_erase
+  idempotency: "The record id is stream|origin|seq of the target op; erasing twice answers the first erasure op and writes nothing new; applying it again on a node is a no-op."
 - intent: menu.tax_class.set
   intent_v: 1
   class: config
@@ -100,7 +122,10 @@ intents:
     outlet_tax_profile:
     - insert
     - set
-  idempotency: "The row id is a UUIDv5 of outlet and financial year; the emit key is derived from the caller's Idempotency-Key, so a retried edit is one op."
+    billing_settings:
+    - insert
+    - set
+  idempotency: "The row id is a UUIDv5 of outlet and financial year; the emit key is derived from the caller's Idempotency-Key, so a retried edit is one op. The same op carries price_mode (a field of billing_settings, group tax): a set of price_mode on the outlet's billing_settings row, or an insert of that row (with its defaults) when none exists yet; the intent changes no other billing_settings field."
 - intent: settings.numbering.set
   intent_v: 1
   class: config
@@ -144,8 +169,9 @@ intents:
   numbering: none
   entities:
     billing_settings:
+    - insert
     - set
-  idempotency: "The emit key is derived from the caller's Idempotency-Key, so a retried edit is one op."
+  idempotency: "The emit key is derived from the caller's Idempotency-Key, so a retried edit is one op. An outlet whose billing_settings row does not exist yet gets an insert of that row (id UUIDv5 of the outlet, every other field at its default, the limit as given); otherwise a set of discount_limit_bp only."
 - intent: day.revision.record
   intent_v: 1
   class: config

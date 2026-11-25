@@ -61,3 +61,4 @@ func TestDoubleTaxClass(t *testing.T)      { httpsuite.TaxClass(t, factory) }
 func TestDoubleImport(t *testing.T)        { httpsuite.Import(t, factory) }
 func TestDoubleOutage(t *testing.T)        { httpsuite.Outage(t, factory) }
 func TestDoubleImportBrand(t *testing.T)   { httpsuite.ImportBrand(t, factory) }
+func TestDoubleSupportImport(t *testing.T) { httpsuite.SupportImport(t, factory) }
