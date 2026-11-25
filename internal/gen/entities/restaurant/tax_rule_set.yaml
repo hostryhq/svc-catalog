@@ -1,0 +1,52 @@
+entity: tax_rule_set
+entity_v: 1
+owner: billing
+stream: tenant
+policy: append
+cloud_origin_only: true
+id:
+  rule: uuidv5
+  name: tax_rule_set|{tenant_id}|{version}
+description: A published tax rule set version, emitted by billing to every tenant's tenant stream through the gateway
+  emit API. Immutable; no end date until superseded. The id is a UUIDv5 of tenant and version, equal to the emit
+  op id.
+fields:
+  version:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Platform-wide version.
+  name:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 80
+    description: Label.
+  effective_date:
+    type: date
+    required: true
+    policy: immutable
+    description: First IST invoice date.
+  calc_v:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Calculation version.
+  review_status:
+    type: enum
+    values:
+    - reviewed
+    - unreviewed
+    required: true
+    policy: immutable
+    description: reviewed or unreviewed.
+  content_hash:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 64
+    description: SHA-256 of the canonical rules.
+written_by_intents:
+- tax.rule_set.publish

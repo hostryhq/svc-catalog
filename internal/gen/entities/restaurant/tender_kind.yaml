@@ -1,0 +1,34 @@
+entity: tender_kind
+entity_v: 1
+owner: billing
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A tender the outlet offers. on_account is reserved for Phase 5 and not enabled.
+fields:
+  kind:
+    type: enum
+    values:
+    - cash
+    - upi
+    - card
+    - other
+    - eco
+    required: true
+    policy: immutable
+    description: Tender kind.
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 30
+    description: Name shown and totalled by.
+  enabled:
+    type: bool
+    required: true
+    policy: lww
+    description: Offered.
+written_by_intents:
+- settings.outlet.edit

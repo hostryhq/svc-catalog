@@ -1,0 +1,58 @@
+entity: item_outlet
+entity_v: 1
+owner: catalog
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: uuidv5
+  name: item_outlet|{outlet_id}|{item_id}
+description: 'Per-outlet overlay of an item: availability, optional outlet price and station, quick items. Deterministic
+  id per item.'
+fields:
+  item_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: item
+    description: Item.
+  available:
+    type: bool
+    required: true
+    policy: lww
+    description: False while sold out; resets at the start of the next business date by default.
+  outlet_price_variant_id:
+    type: id
+    required: false
+    policy: lww_review
+    ref: item_variant
+    group: price
+    description: The variant that outlet_price_paise overrides; absent means the item's own price (an item without variants). The row id is one per (outlet, item), so v1 holds one override per item; overriding several variants of one item at an outlet needs a new entity_v with the variant in the id.
+  outlet_price_paise:
+    type: paise
+    required: false
+    policy: lww_review
+    minimum: 0
+    group: price
+    description: Outlet price override in paise; absent means the brand price.
+  station_id:
+    type: id
+    required: false
+    policy: lww
+    ref: station
+    description: Station override.
+  quick_item:
+    type: bool
+    required: true
+    policy: lww
+    description: One of up to 12 quick items.
+  quick_sort:
+    type: int
+    required: false
+    policy: lww
+    minimum: 0
+    description: Order among quick items.
+written_by_intents:
+- menu.availability.set
+- menu.price.outlet_set
+- settings.outlet.edit

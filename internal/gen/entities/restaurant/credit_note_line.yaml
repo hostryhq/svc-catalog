@@ -1,0 +1,54 @@
+entity: credit_note_line
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: A credited line (quantity and value credited).
+fields:
+  credit_note_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: credit_note
+    description: Credit note.
+  line_no:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Position.
+  bill_line_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill_line
+    description: Original line.
+  item_name:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 80
+    description: Name snapshot.
+  qty_milli:
+    type: qty_milli
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Credited quantity.
+  net_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Credited value after the original discounts.
+  tax_class:
+    type: string
+    required: true
+    policy: immutable
+    description: Tax class.
+written_by_intents:
+- creditnote.issue
+- bill.rebill

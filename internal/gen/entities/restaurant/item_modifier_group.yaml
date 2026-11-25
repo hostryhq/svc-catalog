@@ -1,0 +1,32 @@
+entity: item_modifier_group
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: uuidv5
+  name: item_modifier_group|{item_id}|{group_id}
+description: Link between an item and a modifier group; unlink is the tombstone. Deterministic id so two devices
+  linking the same pair converge.
+fields:
+  item_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: item
+    description: Item.
+  group_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: modifier_group
+    description: Group.
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Display order.
+written_by_intents:
+- menu.item.edit

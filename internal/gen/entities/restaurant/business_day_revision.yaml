@@ -1,0 +1,156 @@
+entity: business_day_revision
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+cloud_origin_only: true
+id:
+  rule: client_uuidv7
+description: A numbered revision of a closed day; cloud-origin only, billing is the only writer so a printed number
+  never changes (A1.1 item 6). One per origin device and push batch.
+fields:
+  business_day_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: business_day
+    description: Day.
+  revision:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: From 1.
+  cause:
+    type: enum
+    values:
+    - late_device
+    - in_flight
+    - second_close
+    - recovered
+    required: true
+    policy: immutable
+    description: Why.
+  origin_device_id:
+    type: id
+    required: true
+    policy: immutable
+    description: Device whose ops are covered.
+  op_from_seq:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: First sequence covered.
+  op_to_seq:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Last sequence covered.
+  display_number:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 48
+    description: Z/<date>/<device>/R<n>.
+  gross_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Sum of line values before discounts.
+    policy: immutable
+  discount_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Total discount (line and bill level).
+    policy: immutable
+  net_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Lines after discounts.
+    policy: immutable
+  service_charge_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Service charge.
+    policy: immutable
+  cgst_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Total CGST.
+    policy: immutable
+  sgst_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Total SGST.
+    policy: immutable
+  non_gst_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Non-GST subtotal incl. its charge share.
+    policy: immutable
+  round_off_paise:
+    type: paise
+    required: true
+    description: Signed round-off line.
+    policy: immutable
+  total_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Total.
+    policy: immutable
+  bill_count:
+    type: int
+    required: true
+    minimum: 0
+    description: Bills.
+    policy: immutable
+  credit_note_count:
+    type: int
+    required: true
+    minimum: 0
+    description: Credit notes.
+    policy: immutable
+  credit_note_total_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Credit note total.
+    policy: immutable
+  refund_total_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Refunds.
+    policy: immutable
+  internal_consumption_paise:
+    type: paise
+    required: true
+    minimum: 0
+    description: Internal consumption list value (not sales).
+    policy: immutable
+  tenders_json:
+    type: string
+    required: true
+    max_length: 4000
+    description: 'Canonical JSON text: [{tender, name, count, amount_paise}]. x-provisional: array-valued facts
+      travel as canonical JSON strings until the engine supports child rows.'
+    policy: immutable
+  series_ranges_json:
+    type: string
+    required: true
+    max_length: 4000
+    description: 'Canonical JSON text: [{series_code, doc_type, first_number, last_number, count}].'
+    policy: immutable
+written_by_intents:
+- day.revision.record
+x-provisional: Totals reuse the day_close layout; one revision per origin device and push batch.

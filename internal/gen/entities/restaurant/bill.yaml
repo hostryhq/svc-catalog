@@ -1,0 +1,249 @@
+entity: bill
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: 'A numbered sale document, created complete by one op, bill.finalize, in one local transaction (ADR-0014
+  R2). Immutable; corrected only by a credit note or a re-bill. Self-contained: needs nothing from orders or catalog.'
+fields:
+  number:
+    type: string
+    required: true
+    policy: immutable
+    doc_number: true
+    max_length: 16
+    description: Legal document number <code>/<FY>/<running>; allocated on the device in the finalising transaction
+      (ADR-0002 S7). Never changed or reused; billing never allocates.
+  series_code:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 3
+    description: Series code.
+  doc_type:
+    type: enum
+    values:
+    - tax_invoice
+    - bill_of_supply
+    - plain_bill
+    required: true
+    policy: immutable
+    description: Follows the regime of the registration.
+  source_kind:
+    type: enum
+    values:
+    - check
+    - counter
+    - manual_book
+    required: true
+    policy: immutable
+    description: check, counter, or manual_book (late entry from a paper book; id is a UUIDv5 of series, FY and
+      number so the same page typed twice converges).
+  check_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: check
+    description: Check; absent for a counter sale or manual_book.
+  order_type:
+    type: enum
+    values:
+    - dine_in
+    - takeaway
+    - counter
+    required: true
+    policy: immutable
+    description: Type.
+  eco:
+    type: bool
+    required: true
+    policy: immutable
+    description: Aggregator order.
+  token_no:
+    type: int
+    required: false
+    policy: immutable
+    minimum: 1
+    description: Display token.
+  customer_name:
+    type: string
+    required: false
+    policy: immutable
+    pii: true
+    max_length: 60
+    description: Guest name.
+  customer_gstin:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 15
+    description: Guest GSTIN.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date of the open day with the latest date known at finalisation; kept for ever.
+  invoice_date:
+    type: date
+    required: true
+    policy: immutable
+    description: IST calendar date of finalisation; decides the FY and the tax reports.
+  financial_year:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 4
+    description: Four digits, 2627.
+  calc_v:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Calculation version (api-specs/tax).
+  ruleset_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: tax_rule_set
+    description: Rule set version used.
+  price_mode:
+    type: enum
+    values:
+    - exclusive
+    - inclusive
+    required: true
+    policy: immutable
+    description: exclusive or inclusive.
+  waiter_id:
+    type: id
+    required: false
+    policy: immutable
+    description: Waiter attribution.
+  gross_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Sum of line values.
+  discount_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total discount.
+  bill_discount_kind:
+    type: enum
+    values:
+    - percent
+    - amount
+    required: false
+    policy: immutable
+    description: Bill-level discount kind.
+  bill_discount_value:
+    type: int
+    required: false
+    policy: immutable
+    minimum: 0
+    description: Basis points or paise.
+  service_charge_bp:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Service charge rate applied.
+  service_charge_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Service charge.
+  packing_charge_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Packing charge.
+  packing_tax_class:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 30
+    description: Tax class the packing charge was taxed in when the bill was made (calc input packing.tax_class); absent when there was no packing charge. A credit note reads it from here, never from the outlet settings of today.
+  round_off:
+    type: bool
+    required: false
+    policy: immutable
+    description: True when the outlet rounded the bill total to the whole rupee when the bill was made (calc input round_off); absent means false. A credit note reads it from here, never from the outlet settings of today.
+  non_gst_subtotal_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Non-GST subtotal incl. its charge share.
+  taxable_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Sum of taxable values.
+  cgst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total CGST.
+  sgst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total SGST.
+  igst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total IGST; 0 in Phase 2.
+  round_off_paise:
+    type: paise
+    required: true
+    policy: immutable
+    description: Signed round-off.
+  total_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total.
+  book_total_paise:
+    type: paise
+    required: false
+    policy: immutable
+    minimum: 0
+    description: 'manual_book only: total written on the paper, compared by verification.'
+  replaces_bill_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: bill
+    description: Bill a re-bill replaces.
+  rebill_group_id:
+    type: id
+    required: false
+    policy: immutable
+    description: Groups the credit note and replacement bills of one re-bill op.
+detectors:
+- two bills from one check
+- order line on two bills
+- document type does not match the registration regime
+- tax verification (mismatch, stale_rules, profile_mismatch, manual_entry)
+- number outside issued series (quarantined by the gateway)
+- gap in the series register
+written_by_intents:
+- bill.finalize
+- bill.rebill
+- bill.manual_entry
+notes: 'id: client UUIDv7, except source_kind manual_book, where it is uuidv5 "bill|{series_code}|{financial_year}|{number}".'

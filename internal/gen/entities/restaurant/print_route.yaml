@@ -1,0 +1,43 @@
+entity: print_route
+entity_v: 1
+owner: catalog
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: Maps a document type, and for KOTs a station, to a printer.
+fields:
+  doc_type:
+    type: enum
+    values:
+    - kot
+    - cancel_kot
+    - pre_bill
+    - bill
+    - credit_note
+    - report
+    required: true
+    policy: immutable
+    description: Document.
+  station_code:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 20
+    description: Station for KOTs.
+  printer_id:
+    type: id
+    required: true
+    policy: lww
+    ref: printer
+    description: Printer.
+  copies:
+    type: int
+    required: true
+    policy: lww
+    minimum: 1
+    maximum: 5
+    description: Copies.
+written_by_intents:
+- settings.outlet.edit

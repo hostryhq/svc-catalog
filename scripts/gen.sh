@@ -12,6 +12,11 @@ mkdir -p .tmp internal/gen
 npx --yes "@redocly/cli@${REDOCLY_VERSION}" bundle "$SPECS/openapi/catalog/v1/openapi.yaml" -o .tmp/catalog.yaml >/dev/null
 "$OAPI" -generate types,std-http-server,client -package gen -o internal/gen/catalog.gen.go .tmp/catalog.yaml
 go run ./tools/gen -spec "$SPECS/openapi/catalog/v1/openapi.yaml" -permissions "$SPECS/common/permissions.yaml" -out internal/gen
+# The entity registry the projection engine reads (go-common/sync.LoadRegistry): every entity file, copied so the
+# service embeds exactly the policies of the pinned spec commit.
+rm -rf internal/gen/entities && mkdir -p internal/gen/entities && cp -r "$SPECS/entities/restaurant" internal/gen/entities/restaurant
+# The cloud-origin intent registry, for the in-process fake of the gateway emit operation (internal/fakegw).
+cp "$SPECS/sync/intents/cloud.yaml" internal/gen/cloud-intents.yaml
 {
   echo "api-specs commit: $(cd "$SPECS" && git rev-parse HEAD)"
   echo "oapi-codegen: $("$OAPI" --version | tail -1)"

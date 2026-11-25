@@ -1,0 +1,134 @@
+entity: billing_settings
+entity_v: 1
+owner: billing
+stream: outlet
+policy: lww
+id:
+  rule: uuidv5
+  name: billing_settings|{outlet_id}
+description: Outlet billing settings; one row per outlet. number_at, the discount limit and price_mode are strong-session
+  edits.
+fields:
+  number_at:
+    type: enum
+    values:
+    - settle
+    - print
+    required: true
+    policy: lww_review
+    group: numbering
+    note: settings.numbering.edit; only with no open check
+    description: settle (default) or print.
+  price_mode:
+    type: enum
+    values:
+    - exclusive
+    - inclusive
+    required: true
+    policy: lww_review
+    group: tax
+    description: exclusive (default) or inclusive.
+  round_off:
+    type: bool
+    required: true
+    policy: lww_review
+    group: rounding
+    description: Round to the nearest rupee.
+  service_charge_bp:
+    type: bp
+    required: true
+    policy: lww_review
+    group: charges
+    minimum: 0
+    maximum: 2500
+    description: Service charge rate; 0 is off.
+  service_charge_dine_in:
+    type: bool
+    required: true
+    policy: lww_review
+    group: charges
+    description: Applies to dine-in.
+  service_charge_takeaway:
+    type: bool
+    required: true
+    policy: lww_review
+    group: charges
+    description: Applies to takeaway.
+  service_charge_counter:
+    type: bool
+    required: true
+    policy: lww_review
+    group: charges
+    description: Applies to counter.
+  packing_charge_paise:
+    type: paise
+    required: true
+    policy: lww_review
+    minimum: 0
+    group: charges
+    description: Packing charge per bill; 0 is off.
+  packing_tax_class:
+    type: string
+    required: true
+    policy: lww_review
+    group: charges
+    description: Tax class of the packing charge.
+  discount_limit_bp:
+    type: bp
+    required: true
+    policy: lww_review
+    group: limits
+    minimum: 0
+    maximum: 10000
+    note: bill.discount.limit.edit, strong session
+    description: Cashier discount limit.
+  rebill_allowance_per_shift:
+    type: int
+    required: true
+    policy: lww_review
+    group: limits
+    minimum: 0
+    description: Re-bills per member per shift without approval.
+  comp_allowance_paise:
+    type: paise
+    required: true
+    policy: lww_review
+    minimum: 0
+    group: limits
+    description: Comp and internal closure list value per member per shift.
+  open_item_limit_paise:
+    type: paise
+    required: true
+    policy: lww_review
+    minimum: 0
+    group: limits
+    description: Open item price limit.
+  manual_entry_max_days_back:
+    type: int
+    required: true
+    policy: lww_review
+    group: limits
+    minimum: 0
+    maximum: 7
+    description: Days back a bill-book entry may be dated.
+  shift_required:
+    type: bool
+    required: true
+    policy: lww
+    description: Track shifts.
+  handover_count:
+    type: bool
+    required: true
+    policy: lww
+    description: Counted handover on cashier change.
+  day_cutoff_minutes:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    maximum: 720
+    description: Minutes after midnight IST after which an open day shows a close banner (default 300).
+written_by_intents:
+- settings.outlet.edit
+- settings.numbering.set
+- settings.discount_limit.set

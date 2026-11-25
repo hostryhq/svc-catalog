@@ -1,0 +1,43 @@
+entity: shift
+entity_v: 1
+owner: billing
+stream: outlet
+policy: rank
+id:
+  rule: client_uuidv7
+description: One member's turn at one drawer on one billing device. Opened by the actor; closing is a rank step
+  plus a shift_close fact.
+fields:
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date.
+  opening_float_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Opening float.
+  handover_from_shift_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: shift
+    description: Shift handed over from.
+  status:
+    type: enum
+    values:
+    - open
+    - closed
+    required: true
+    policy: rank
+    order:
+    - open
+    - closed
+    description: open then closed.
+detectors:
+- handover skipped
+written_by_intents:
+- shift.open
+- shift.close

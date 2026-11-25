@@ -580,5 +580,30 @@
   {
     "name": "admin.report.ledger",
     "owner": "admin"
+  },
+  {
+    "name": "sync.push",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.drain",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.quarantine.manage",
+    "owner": "sync",
+    "sensitive": true
+  },
+  {
+    "name": "sync.exceptions.read",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.register.read",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.emit",
+    "owner": "sync"
   }
 ]

@@ -1,0 +1,30 @@
+entity: modifier_group
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A modifier group with selection bounds.
+fields:
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 40
+    description: Group name.
+  min_select:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Minimum options.
+  max_select:
+    type: int
+    required: true
+    policy: lww
+    minimum: 1
+    description: Maximum options.
+written_by_intents:
+- menu.modifier.edit

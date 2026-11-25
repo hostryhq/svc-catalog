@@ -1,0 +1,66 @@
+entity: bill_tax_line
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: One tax group of a bill (tax class and rate). Tax is per group, not per line.
+fields:
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: Parent document.
+  tax_class:
+    type: string
+    required: true
+    policy: immutable
+    description: Tax class.
+  rate_bp:
+    type: bp
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total GST rate.
+  gst_applies:
+    type: bool
+    required: true
+    policy: immutable
+    description: False for the non-GST group.
+  charge_alloc_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Share of service and packing charge.
+  taxable_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Taxable value (the group value for non-GST).
+  cgst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: CGST.
+  sgst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: SGST.
+  igst_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: IGST; 0 in Phase 2.
+written_by_intents:
+- bill.finalize
+- bill.rebill
+- bill.manual_entry

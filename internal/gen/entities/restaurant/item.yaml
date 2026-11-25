@@ -1,0 +1,92 @@
+entity: item
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A menu item. Price lives in price_entry; archiving is the tombstone (RM-M7).
+fields:
+  category_id:
+    type: id
+    required: true
+    policy: lww
+    ref: category
+    description: Category.
+  name_en:
+    type: string
+    required: true
+    policy: lww
+    max_length: 80
+    description: English name.
+  name_ta:
+    type: string
+    required: false
+    policy: lww
+    max_length: 80
+    description: Tamil name.
+  name_ml:
+    type: string
+    required: false
+    policy: lww
+    max_length: 80
+    description: Malayalam name.
+  kitchen_name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 20
+    description: Kitchen short name, at most 20 characters.
+  station_code:
+    type: string
+    required: false
+    policy: lww
+    max_length: 20
+    description: Station code override; empty means the category default.
+  veg_mark:
+    type: enum
+    values:
+    - veg
+    - non_veg
+    - egg
+    - none
+    required: true
+    policy: lww
+    description: Veg mark.
+  tax_class:
+    type: string
+    required: true
+    policy: lww_review
+    group: tax
+    note: strong_only edit (menu.tax_class.edit)
+    description: Tax class key from the rule set in force (never a rate).
+  code:
+    type: string
+    required: false
+    policy: lww
+    pattern: ^[0-9]{1,8}$
+    max_length: 8
+    description: Item code, digits, unique per brand; uniqueness is a detector, not a constraint, because two devices
+      may assign the same code while partitioned.
+  status:
+    type: enum
+    values:
+    - active
+    - hidden
+    required: true
+    policy: lww
+    description: active or hidden.
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Display order.
+detectors:
+- duplicate item code within a brand
+written_by_intents:
+- menu.item.edit
+- menu.item.archive
+- menu.import.apply
+- menu.tax_class.set

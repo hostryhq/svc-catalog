@@ -1,0 +1,37 @@
+entity: item_variant
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A named price point of an item; exactly one is the default.
+fields:
+  item_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: item
+    description: Item.
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 40
+    description: Variant name.
+  is_default:
+    type: bool
+    required: true
+    policy: lww
+    description: Preselected variant.
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Display order.
+detectors:
+- item with no default variant or two defaults
+written_by_intents:
+- menu.item.edit

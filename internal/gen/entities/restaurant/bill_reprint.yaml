@@ -1,0 +1,34 @@
+entity: bill_reprint
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+id:
+  rule: client_uuidv7
+description: A reprint or re-display of a finalised bill, kept as an audit-only log (the permission bill.reprint). It carries no money or tax and never a number; a reprint is marked COPY on paper. Member and device are the op's actor and origin. Provisional, conservative choice, to be confirmed by product.
+fields:
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: The bill reprinted.
+  copy_no:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: 1 for the first reprint of the bill, then 2, 3 (counted by the device from the rows it holds; a collision is two rows).
+  mode:
+    type: enum
+    values:
+    - printed
+    - displayed
+    required: true
+    policy: immutable
+    description: printed or displayed.
+x-provisional: Audit-only log chosen over no record because the spec lists bill.reprint and reports 14 (reprint log); needs product confirmation.
+detectors:
+- bill reprinted more than three times
+written_by_intents:
+- bill.reprint

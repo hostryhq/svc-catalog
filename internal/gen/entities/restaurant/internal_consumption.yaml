@@ -1,0 +1,56 @@
+entity: internal_consumption
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: 'A check closed as staff meal, owner consumption, sample or guest complimentary: no invoice, no payment,
+  no sale-series number; excluded from sales and tax (RM-O27). x-provisional (O2-1).'
+fields:
+  check_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: check
+    description: Check closed.
+  kind:
+    type: enum
+    values:
+    - staff_meal
+    - owner_consumption
+    - sample
+    - guest_complimentary
+    required: true
+    policy: immutable
+    description: Why.
+  reason_code_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: reason_code
+    description: Reason.
+  list_value_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: List value of the lines from their snapshots.
+  ref:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 24
+    description: Display reference IC/<device code>/<counter>; not a legal number.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date.
+detectors:
+- internal closure allowance exceeded
+- check closed internally and billed
+written_by_intents:
+- check.close_internal
+x-provisional: Owner billing, non-tax internal document, own non-invoice register (founder default O2-1); ADR needed.

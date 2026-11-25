@@ -1,0 +1,22 @@
+entity: day_open
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+id:
+  rule: client_uuidv7
+description: A day was opened (actor and origin say who and on which device).
+fields:
+  business_day_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: business_day
+    description: Day.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Date.
+written_by_intents:
+- day.open

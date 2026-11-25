@@ -402,7 +402,7 @@ type CatalogStatus string
 
 // Category A menu category (brand stream, lww). Archiving needs no active items (RM-M7).
 type Category struct {
-	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	BrandId Id `json:"brand_id"`
@@ -417,7 +417,7 @@ type Category struct {
 	// Example: fnb_standard
 	DefaultTaxClass TaxClass `json:"default_tax_class"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -469,6 +469,11 @@ type CommitMenuImport struct {
 
 // CreateMenuImport A CSV menu, previewed and validated; nothing is written until commit.
 type CreateMenuImport struct {
+	// BrandId The brand whose menu is imported (a menu is per brand and is emitted to the brand stream). Optional; when absent it is the brand of the outlet in X-Outlet-Id, and 422 brand_required when the organisation has several brands and no outlet scope is given. Another organisation's brand is 404.
+	//
+	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
+	BrandId *Id `json:"brand_id,omitempty"`
+
 	// CsvText UTF-8 CSV with columns category, item name, item code, variant name, price (rupees, up to two decimals), veg mark, station; up to 2,000 rows.
 	//
 	// Example: category,item name,item code,variant name,price,veg mark,station
@@ -486,12 +491,12 @@ type DiningTable struct {
 	// Active Inactive tables are hidden; a table with an open seating cannot be deactivated.
 	Active bool `json:"active"`
 
-	// FloorId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// FloorId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	FloorId Id `json:"floor_id"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -501,7 +506,7 @@ type DiningTable struct {
 	// Example: T1
 	Name string `json:"name"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -540,7 +545,7 @@ type Exception struct {
 	// Example: 2026-11-24T13:05:11.120Z
 	DetectedAt Timestamp `json:"detected_at"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -550,7 +555,7 @@ type Exception struct {
 	// Example: payments_exceed_total
 	Kind string `json:"kind"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -614,7 +619,7 @@ type ExceptionStatus string
 
 // Floor A section of the floor (RM-F1).
 type Floor struct {
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -624,7 +629,7 @@ type Floor struct {
 	// Example: Ground floor
 	Name string `json:"name"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -646,7 +651,7 @@ type FloorPage struct {
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
-// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 //
 // Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 type Id = string
@@ -671,12 +676,12 @@ type ImportRowError struct {
 
 // Item A menu item with its variants. An item with variants has no price of its own; a priced item without variants has one default variant named after the item (RM-M2, RM-M3).
 type Item struct {
-	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	BrandId Id `json:"brand_id"`
 
-	// CategoryId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// CategoryId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	CategoryId Id `json:"category_id"`
@@ -686,7 +691,7 @@ type Item struct {
 	// Example: 101
 	Code *string `json:"code,omitempty"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -748,12 +753,12 @@ type ItemOutlet struct {
 	// Available False while sold out; resets at the start of the next business date by default (RM-M8).
 	Available bool `json:"available"`
 
-	// ItemId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// ItemId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	ItemId Id `json:"item_id"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -764,7 +769,7 @@ type ItemOutlet struct {
 	// QuickItem One of the outlet's up to 12 quick items (RM-M10).
 	QuickItem bool `json:"quick_item"`
 
-	// StationId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// StationId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	StationId *Id `json:"station_id,omitempty"`
@@ -794,7 +799,7 @@ type ItemPage struct {
 
 // ItemVariant A named price point of an item; exactly one variant per item is the default (RM-M3).
 type ItemVariant struct {
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -802,7 +807,7 @@ type ItemVariant struct {
 	// IsDefault Whether this variant is preselected.
 	IsDefault bool `json:"is_default"`
 
-	// ItemId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// ItemId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	ItemId Id `json:"item_id"`
@@ -826,7 +831,7 @@ type Menu struct {
 	// Availability Outlet overlay rows.
 	Availability []ItemOutlet `json:"availability"`
 
-	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// BrandId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	BrandId Id `json:"brand_id"`
@@ -845,7 +850,7 @@ type Menu struct {
 	// ModifierGroups Modifier groups referenced by items.
 	ModifierGroups []ModifierGroup `json:"modifier_groups"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -881,7 +886,7 @@ type MenuImport struct {
 	// Example: menu.csv
 	Filename string `json:"filename"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -940,7 +945,7 @@ type MenuImportPage struct {
 
 // Modifier A modifier option. The price delta may be negative; the line total never goes below zero. Modifier prices are taxed with the line (RM-M3).
 type Modifier struct {
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -961,7 +966,7 @@ type Modifier struct {
 
 // ModifierGroup A modifier group with selection bounds.
 type ModifierGroup struct {
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -1052,12 +1057,12 @@ type Printer struct {
 	// Example: 0
 	DrawerPin int `json:"drawer_pin"`
 
-	// HostDeviceId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// HostDeviceId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	HostDeviceId *Id `json:"host_device_id,omitempty"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -1067,7 +1072,7 @@ type Printer struct {
 	// Example: Kitchen LAN
 	Name string `json:"name"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -1147,6 +1152,11 @@ type Problem struct {
 	// Example: /v1/resources/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Instance *string `json:"instance,omitempty"`
 
+	// Reason Optional sub-code that refines `code`, for example approval_not_executable carries not_approved, lapsed, executed, not_approver or subject_changed.
+	//
+	// Example: not_approved
+	Reason *string `json:"reason,omitempty"`
+
 	// RequestId Request ID for log correlation.
 	//
 	// Example: req_0190a1b2c3d4
@@ -1178,7 +1188,7 @@ type ReasonCode struct {
 	// Active Whether the code is offered.
 	Active bool `json:"active"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -1230,7 +1240,7 @@ type Station struct {
 	// Example: KITCHEN
 	Code string `json:"code"`
 
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -1245,7 +1255,7 @@ type Station struct {
 	// Example: Kitchen
 	Name string `json:"name"`
 
-	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// OutletId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	OutletId Id `json:"outlet_id"`
@@ -1255,7 +1265,7 @@ type Station struct {
 	// Example: both
 	Output StationOutput `json:"output"`
 
-	// PrinterId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// PrinterId Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	PrinterId *Id `json:"printer_id,omitempty"`
@@ -1289,7 +1299,7 @@ type TaxClass = string
 
 // TaxClassChange Result of a tax-class change; the op was emitted to every device of the brand.
 type TaxClassChange struct {
-	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+	// Id Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 	//
 	// Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 	Id Id `json:"id"`
@@ -1329,13 +1339,16 @@ type IdempotencyKey = string
 // Limit defines model for Limit.
 type Limit = int
 
-// OutletScope Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted).
+// OutletScope Client-generated, time-sortable UUIDv7 in lower-case canonical form (ADR-0003 policy; ULID is not accepted). The row id of an entity whose entity file declares a deterministic id (id.rule uuidv5, ADR-0014) is a UUIDv5 in the same form, so two devices that write the same natural key converge on one row.
 //
 // Example: 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b
 type OutletScope = Id
 
 // Conflict RFC 9457 problem details. `type` is a stable URI per error kind.
 type Conflict = Problem
+
+// EmitUnavailable RFC 9457 problem details. `type` is a stable URI per error kind.
+type EmitUnavailable = Problem
 
 // Forbidden RFC 9457 problem details. `type` is a stable URI per error kind.
 type Forbidden = Problem
@@ -1726,7 +1739,7 @@ type ClientInterface interface {
 
 	// CreateMenuImportWithBody Upload a CSV menu and preview it
 	//
-	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1735,7 +1748,7 @@ type ClientInterface interface {
 
 	// CreateMenuImport Upload a CSV menu and preview it
 	//
-	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -2008,7 +2021,7 @@ func (c *Client) ListMenuImports(ctx context.Context, params *ListMenuImportsPar
 
 // CreateMenuImportWithBody Upload a CSV menu and preview it
 //
-// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 //
 // Takes any type of body and a specified content type.
 //
@@ -2027,7 +2040,7 @@ func (c *Client) CreateMenuImportWithBody(ctx context.Context, params *CreateMen
 
 // CreateMenuImport Upload a CSV menu and preview it
 //
-// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -3641,7 +3654,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateMenuImportWithBodyWithResponse Upload a CSV menu and preview it
 	//
-	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3650,7 +3663,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateMenuImportWithResponse Upload a CSV menu and preview it
 	//
-	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+	// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3780,6 +3793,11 @@ func (r ListCategoriesResponse) ContentType() string {
 	return ""
 }
 
+// SetCategoryTaxClassResponse503Headers the declared response headers of an HTTP 503 response for SetCategoryTaxClass
+type SetCategoryTaxClassResponse503Headers struct {
+	RetryAfter *int
+}
+
 type SetCategoryTaxClassResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3795,6 +3813,10 @@ type SetCategoryTaxClassResponse struct {
 	ApplicationproblemJSON409 *Conflict
 	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
 	ApplicationproblemJSON422 *ValidationFailed
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *EmitUnavailable
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *SetCategoryTaxClassResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -3825,6 +3847,11 @@ func (r SetCategoryTaxClassResponse) GetApplicationproblemJSON409() *Conflict {
 // GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
 func (r SetCategoryTaxClassResponse) GetApplicationproblemJSON422() *ValidationFailed {
 	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r SetCategoryTaxClassResponse) GetApplicationproblemJSON503() *EmitUnavailable {
+	return r.ApplicationproblemJSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -4214,6 +4241,11 @@ func (r GetItemResponse) ContentType() string {
 	return ""
 }
 
+// SetItemTaxClassResponse503Headers the declared response headers of an HTTP 503 response for SetItemTaxClass
+type SetItemTaxClassResponse503Headers struct {
+	RetryAfter *int
+}
+
 type SetItemTaxClassResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4229,6 +4261,10 @@ type SetItemTaxClassResponse struct {
 	ApplicationproblemJSON409 *Conflict
 	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
 	ApplicationproblemJSON422 *ValidationFailed
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *EmitUnavailable
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *SetItemTaxClassResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -4259,6 +4295,11 @@ func (r SetItemTaxClassResponse) GetApplicationproblemJSON409() *Conflict {
 // GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
 func (r SetItemTaxClassResponse) GetApplicationproblemJSON422() *ValidationFailed {
 	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r SetItemTaxClassResponse) GetApplicationproblemJSON503() *EmitUnavailable {
+	return r.ApplicationproblemJSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -5100,7 +5141,7 @@ func (c *ClientWithResponses) ListMenuImportsWithResponse(ctx context.Context, p
 
 // CreateMenuImportWithBodyWithResponse Upload a CSV menu and preview it
 //
-// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -5115,7 +5156,7 @@ func (c *ClientWithResponses) CreateMenuImportWithBodyWithResponse(ctx context.C
 
 // CreateMenuImportWithResponse Upload a CSV menu and preview it
 //
-// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
+// strong_only (x-step-up). A support act-mode session may also call it, through catalog.import, but a support import may only ADD items, categories and variants; any row that would change an existing item, variant or price is refused 422 owner_commit_required and needs the owner's own commit (security review), once security-reviewer has signed the flag and IST-43 passes (ADR-0005 A2.5 item 5, A1 BR-A1-89); until then act mode answers mode_not_supported at identity. Validates every row, returns the preview, writes nothing. Max 2,000 rows.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -5339,6 +5380,26 @@ func ParseSetCategoryTaxClassResponse(rsp *http.Response) (*SetCategoryTaxClassR
 		}
 		response.ApplicationproblemJSON422 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest EmitUnavailable
+		if err := runtime.JSONUnmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers SetCategoryTaxClassResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil
@@ -5668,6 +5729,26 @@ func ParseSetItemTaxClassResponse(rsp *http.Response) (*SetItemTaxClassResponse,
 		}
 		response.ApplicationproblemJSON422 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest EmitUnavailable
+		if err := runtime.JSONUnmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers SetItemTaxClassResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil

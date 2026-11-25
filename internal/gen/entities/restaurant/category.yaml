@@ -1,0 +1,61 @@
+entity: category
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A menu category.
+fields:
+  name_en:
+    type: string
+    required: true
+    policy: lww
+    max_length: 60
+    description: English name.
+  name_ta:
+    type: string
+    required: false
+    policy: lww
+    max_length: 60
+    description: Tamil name.
+  name_ml:
+    type: string
+    required: false
+    policy: lww
+    max_length: 60
+    description: Malayalam name.
+  default_station_code:
+    type: string
+    required: false
+    policy: lww
+    max_length: 20
+    description: Station code new items inherit; resolved per outlet through station.code (stations are outlet rows,
+      the menu is brand-wide).
+  default_tax_class:
+    type: string
+    required: true
+    policy: lww_review
+    group: tax
+    note: 'strong_only edit (menu.tax_class.edit): online API, never a pin-session op'
+    description: Tax class key from the rule set in force (never a rate).
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Display order.
+  status:
+    type: enum
+    values:
+    - active
+    - hidden
+    required: true
+    policy: lww
+    description: active or hidden; archived is the tombstone.
+detectors:
+- category archived with active items
+written_by_intents:
+- menu.category.edit
+- menu.tax_class.set

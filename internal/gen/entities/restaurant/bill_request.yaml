@@ -1,0 +1,23 @@
+entity: bill_request
+entity_v: 1
+owner: orders
+stream: outlet
+policy: append
+id:
+  rule: client_uuidv7
+description: '"Bill, please": a request a counter device acts on; counter devices show it.'
+fields:
+  check_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: check
+    description: Check.
+  seating_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: seating
+    description: Seating.
+written_by_intents:
+- bill.request

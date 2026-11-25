@@ -1,0 +1,45 @@
+entity: shift_close
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: The counted close of a shift; variance is attributed per member.
+fields:
+  shift_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: shift
+    description: Shift.
+  counted_paise:
+    type: paise
+    required: false
+    policy: immutable
+    minimum: 0
+    description: Cash counted.
+  expected_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Expected cash.
+  variance_paise:
+    type: paise
+    required: false
+    policy: immutable
+    description: Counted minus expected.
+  force_closed:
+    type: bool
+    required: true
+    policy: immutable
+    description: Closed by a manager with "not counted".
+  handover_counted:
+    type: bool
+    required: true
+    policy: immutable
+    description: False when a handover was skipped.
+written_by_intents:
+- shift.close

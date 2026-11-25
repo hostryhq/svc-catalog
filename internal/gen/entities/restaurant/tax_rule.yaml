@@ -1,0 +1,88 @@
+entity: tax_rule
+entity_v: 1
+owner: billing
+stream: tenant
+policy: append
+cloud_origin_only: true
+id:
+  rule: uuidv5
+  name: tax_rule|{rule_set_id}|{tax_class}|{regime}|{specified_premises}|{order_channel}
+description: One mapping of (tax class, regime, specified premises, order channel) to rate components and a document
+  type.
+fields:
+  rule_set_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: tax_rule_set
+    description: Rule set.
+  tax_class:
+    type: string
+    required: true
+    policy: immutable
+    description: Tax class.
+  regime:
+    type: enum
+    values:
+    - regular
+    - composition
+    - unregistered
+    required: true
+    policy: immutable
+    description: Regime.
+  specified_premises:
+    type: bool
+    required: true
+    policy: immutable
+    description: Flag.
+  order_channel:
+    type: enum
+    values:
+    - dine_in
+    - takeaway
+    - counter
+    - eco
+    required: true
+    policy: immutable
+    description: Channel.
+  doc_type:
+    type: enum
+    values:
+    - tax_invoice
+    - bill_of_supply
+    - plain_bill
+    required: true
+    policy: immutable
+    description: Document type.
+  gst_applies:
+    type: bool
+    required: true
+    policy: immutable
+    description: False outside GST.
+  cgst_bp:
+    type: bp
+    required: true
+    policy: immutable
+    minimum: 0
+    description: CGST rate.
+  sgst_bp:
+    type: bp
+    required: true
+    policy: immutable
+    minimum: 0
+    description: SGST rate; equals cgst_bp.
+  igst_bp:
+    type: bp
+    required: true
+    policy: immutable
+    minimum: 0
+    maximum: 0
+    description: IGST rate; 0 in Phase 2.
+  sac:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 8
+    description: SAC or HSN.
+written_by_intents:
+- tax.rule_set.publish

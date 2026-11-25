@@ -1,0 +1,52 @@
+entity: cash_event
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: Cash in or out, owner cash drop, no-sale drawer opening.
+fields:
+  kind:
+    type: enum
+    values:
+    - cash_in
+    - cash_out
+    - owner_cash_drop
+    - no_sale
+    required: true
+    policy: immutable
+    description: Event kind.
+  amount_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Amount; 0 for no_sale.
+  reason_code_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: reason_code
+    description: Reason.
+  note:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 100
+    description: Note.
+  shift_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: shift
+    description: Shift.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date.
+written_by_intents:
+- drawer.cash_move
+- drawer.open_no_sale
