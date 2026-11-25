@@ -8,6 +8,7 @@ import (
 	"github.com/hostryhq/go-auth"
 	"github.com/hostryhq/go-auth/authtest"
 	"github.com/hostryhq/go-common/apperr"
+	gsync "github.com/hostryhq/go-common/sync"
 	"github.com/hostryhq/go-common/testkit"
 
 	"github.com/hostryhq/svc-catalog/internal/gen"
@@ -67,5 +68,44 @@ func TestSupportImportMayOnlyAdd(t *testing.T) {
 	}
 	if _, err := svc.CreateMenuImport(ctx, "menu.csv", csvHeader+"Starters,Paneer Tikka,101,Full,250.00,veg,Kitchen\n", "", ""); err != nil {
 		t.Fatalf("the owner may change prices: %v", err)
+	}
+}
+
+// A support import is add-only at commit too: a price the owner changed after the preview must not be written
+// back by the support commit (security review P2-M4). The commit re-checks against the current state.
+func TestSupportImportCommitIsAddOnly(t *testing.T) {
+	svc := newMem(t)
+	w := seed.Example
+	if err := w.Apply(context.Background(), svc, seed.Base); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := gen.Catalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := authtest.NewTenantIssuer(testkit.NewClock()).ContextFor(context.Background(), cat, authtest.Spec{Type: auth.TypeUser, Tenant: w.Org(), Grants: authtest.OwnerGrants()})
+	// The same price again previews as an add-only support import.
+	im, err := svc.CreateSupportImport(ctx, csvHeader+"Starters,Paneer Tikka,101,Full,240.00,veg,Kitchen\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unchanged menu commits.
+	ok, err := svc.CreateSupportImport(ctx, csvHeader+"Starters,Paneer Tikka,101,Full,240.00,veg,Kitchen\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CommitMenuImport(ctx, ok.ID, ok.RowCount); err != nil {
+		t.Fatalf("an add-only support import commits on an unchanged menu: %v", err)
+	}
+	// The owner changes the price after the preview.
+	op := &gsync.Op{Ref: gsync.OpRef{Origin: "owner-device", Stream: "brand:" + w.Brand().String(), Seq: 1}, HLC: "00000000ffff0000", Intent: "menu.item.edit", IntentV: 1,
+		TenantID: w.Org(), Muts: []gsync.Mut{{E: "price_entry", ID: w.PriceRow().String(), K: gsync.KindSet, F: map[string]any{"price_paise": int64(26000)}}}}
+	if err := svc.ApplyOpTx(ctx, op); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.CommitMenuImport(ctx, im.ID, im.RowCount)
+	var ae *apperr.Error
+	if !errors.As(err, &ae) || ae.Code != "owner_commit_required" || ae.Kind != apperr.Validation {
+		t.Fatalf("want 422 owner_commit_required at commit, got %v", err)
 	}
 }

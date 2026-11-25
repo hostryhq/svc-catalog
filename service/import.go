@@ -392,6 +392,11 @@ func (s *Service) CommitMenuImport(ctx context.Context, id ids.ID, rowCount int)
 		if err != nil {
 			return model.Import{}, err
 		}
+		if im.Source == model.SourceSupport {
+			if err := s.assertStillAddOnly(ctx, tx, brands, im.Plan, prev); err != nil {
+				return model.Import{}, err
+			}
+		}
 		// Queued emission (ADR-0014 A2.2 item 7): the ops join emit_queue in this transaction, so they exist
 		// exactly when the job is committed, and a worker sends them in order whatever the gateway does.
 		perm := PermImport
@@ -414,6 +419,49 @@ func (s *Service) CommitMenuImport(ctx context.Context, id ids.ID, rowCount int)
 			ItemsCreated: im.ItemsCreated, ItemsUpdated: im.ItemsUpdated, PriceChanges: im.PriceChanges})
 		return im, s.publish(ctx, tx, ev)
 	})
+}
+
+// assertStillAddOnly re-runs the support add-only rule against the current state: since the preview the owner
+// may have renamed an item or changed a price, and the commit would write the previewed value back (P2-M4).
+// An existing item or price that differs from the plan, or a row the plan adds that now exists, is refused.
+func (s *Service) assertStillAddOnly(ctx context.Context, tx repository.Tx, brands repository.BrandSet, plan *model.ImportPlan, prices map[string]model.Row) error {
+	refuse := func() error {
+		return apperr.New(apperr.Validation, "owner_commit_required",
+			"the menu changed since the preview; a support import may only add, so the owner imports the file themselves")
+	}
+	var codes []string
+	for _, it := range plan.Items {
+		if it.Exists && it.Code != "" {
+			codes = append(codes, it.Code)
+		}
+	}
+	names := map[string]string{}
+	if len(codes) > 0 {
+		items, err := tx.ListRows(ctx, repository.RowQuery{Entity: "item", Brands: brands, In: map[string][]string{"code": codes}})
+		if err != nil {
+			return err
+		}
+		for _, it := range items {
+			names[it.ID] = it.Str("name_en")
+		}
+	}
+	for _, it := range plan.Items {
+		if it.Exists {
+			if n, ok := names[it.ID]; !ok || n != it.NameEn {
+				return refuse()
+			}
+		}
+		for _, v := range it.Variants {
+			cur, ok := prices[v.PriceID]
+			if (v.Exists && ok) && cur.Int("price_paise") != v.PricePaise {
+				return refuse()
+			}
+			if !v.Exists && ok {
+				return refuse() // the owner added this price since the preview
+			}
+		}
+	}
+	return nil
 }
 
 // currentPriceStamps reads the stamp of each existing price row an import will edit, so the edit carries the
