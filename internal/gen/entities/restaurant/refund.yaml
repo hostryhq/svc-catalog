@@ -1,0 +1,51 @@
+entity: refund
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: Money returned for a recorded payment; never changes the bill.
+fields:
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: Bill.
+  payment_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: payment
+    description: Payment refunded.
+  amount_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Amount.
+  tender:
+    type: enum
+    values:
+    - cash
+    - upi
+    - card
+    - other
+    required: true
+    policy: immutable
+    description: Tender returned by.
+  reason_code_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: reason_code
+    description: Reason.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date.
+written_by_intents:
+- payment.refund

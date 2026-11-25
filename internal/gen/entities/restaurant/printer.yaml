@@ -1,0 +1,90 @@
+entity: printer
+entity_v: 1
+owner: catalog
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A printer and how it is reached (ADR-0014 R8).
+fields:
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 30
+    description: Name.
+  connection:
+    type: enum
+    values:
+    - lan
+    - device
+    required: true
+    policy: lww
+    description: lan, or device when attached by USB, Bluetooth or spooler to host_device_id.
+  address:
+    type: string
+    required: false
+    policy: lww
+    max_length: 45
+    description: IPv4 address of a lan printer.
+  port:
+    type: int
+    required: false
+    policy: lww
+    minimum: 1
+    maximum: 65535
+    description: TCP port.
+  host_device_id:
+    type: id
+    required: false
+    policy: lww
+    description: Host device of a device printer.
+  paper_width_mm:
+    type: int
+    required: true
+    policy: lww
+    minimum: 58
+    maximum: 80
+    description: 58 or 80.
+  chars_per_line:
+    type: int
+    required: true
+    policy: lww
+    minimum: 20
+    maximum: 80
+    description: Characters per line.
+  code_page:
+    type: string
+    required: true
+    policy: lww
+    max_length: 20
+    description: ESC/POS code page.
+  cut:
+    type: bool
+    required: true
+    policy: lww
+    description: Cuts after a ticket.
+  drawer_pin:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    maximum: 2
+    description: Cash-drawer pin, 0 for none.
+  raster:
+    type: bool
+    required: true
+    policy: lww
+    description: Raster images supported.
+  power_backup:
+    type: enum
+    values:
+    - none
+    - ups
+    - inverter
+    required: true
+    policy: lww
+    description: Backup the printer has.
+written_by_intents:
+- settings.outlet.edit

@@ -1,0 +1,619 @@
+[
+  {
+    "name": "organisation.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "organisation.manage",
+    "owner": "tenancy",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "brand.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "brand.manage",
+    "owner": "tenancy",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "outlet.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "outlet.create",
+    "owner": "tenancy",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "outlet.manage",
+    "owner": "tenancy",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "tax_registration.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "tax_registration.manage",
+    "owner": "tenancy",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "settings.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "settings.manage",
+    "owner": "tenancy",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "series.read",
+    "owner": "tenancy",
+    "support_viewable": true
+  },
+  {
+    "name": "series.close_unreconciled",
+    "owner": "tenancy",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "link.read",
+    "owner": "tenancy"
+  },
+  {
+    "name": "link.manage",
+    "owner": "tenancy",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "link.revoke",
+    "owner": "tenancy",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "device.read",
+    "owner": "identity",
+    "support_viewable": true
+  },
+  {
+    "name": "device.register",
+    "owner": "identity",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "device.activation_code.create",
+    "owner": "identity",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "device.revoke",
+    "owner": "identity",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "member.read",
+    "owner": "identity",
+    "support_viewable": true
+  },
+  {
+    "name": "member.manage",
+    "owner": "identity",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "member.pin.authorise",
+    "owner": "identity",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "member.role.assign",
+    "owner": "identity",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "member.owner.assign",
+    "owner": "identity",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "role.read",
+    "owner": "identity",
+    "support_viewable": true
+  },
+  {
+    "name": "role.manage",
+    "owner": "identity",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "audit.read",
+    "owner": "identity"
+  },
+  {
+    "name": "support.code.create",
+    "owner": "identity",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "menu.read",
+    "owner": "catalog",
+    "support_viewable": true
+  },
+  {
+    "name": "menu.manage",
+    "owner": "catalog"
+  },
+  {
+    "name": "menu.price.edit",
+    "owner": "catalog",
+    "sensitive": true
+  },
+  {
+    "name": "menu.tax_class.edit",
+    "owner": "catalog",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "menu.import",
+    "owner": "catalog",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "menu.availability.set",
+    "owner": "catalog"
+  },
+  {
+    "name": "menu.open_item",
+    "owner": "catalog"
+  },
+  {
+    "name": "catalog.import",
+    "owner": "catalog",
+    "support_actable": true
+  },
+  {
+    "name": "floor.manage",
+    "owner": "catalog"
+  },
+  {
+    "name": "order.create",
+    "owner": "orders"
+  },
+  {
+    "name": "order.edit",
+    "owner": "orders"
+  },
+  {
+    "name": "order.line.cancel",
+    "owner": "orders",
+    "sensitive": true
+  },
+  {
+    "name": "order.line.cancel.grace",
+    "owner": "orders"
+  },
+  {
+    "name": "order.items.move",
+    "owner": "orders"
+  },
+  {
+    "name": "order.table.move",
+    "owner": "orders"
+  },
+  {
+    "name": "order.table.merge",
+    "owner": "orders"
+  },
+  {
+    "name": "kot.handover",
+    "owner": "orders"
+  },
+  {
+    "name": "kot.reprint",
+    "owner": "orders"
+  },
+  {
+    "name": "kds.view",
+    "owner": "orders"
+  },
+  {
+    "name": "kds.bump",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.split",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.merge",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.new",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.request",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.present",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.cancel",
+    "owner": "orders",
+    "sensitive": true
+  },
+  {
+    "name": "check.close_internal",
+    "owner": "orders",
+    "sensitive": true
+  },
+  {
+    "name": "exceptions.view",
+    "owner": "orders"
+  },
+  {
+    "name": "exceptions.resolve",
+    "owner": "orders"
+  },
+  {
+    "name": "bill.finalize",
+    "owner": "billing"
+  },
+  {
+    "name": "payment.record",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.discount.apply",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.discount.over_limit",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "bill.discount.limit.edit",
+    "owner": "billing",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "bill.line.comp",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "bill.line.comp.allowance",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.service_charge.remove",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.customer_details.edit",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.reprint",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.credit_note.create",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "bill.rebill",
+    "owner": "billing"
+  },
+  {
+    "name": "bill.manual_entry",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "payment.refund",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "drawer.open_no_sale",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "drawer.cash_move",
+    "owner": "billing"
+  },
+  {
+    "name": "shift.open",
+    "owner": "billing"
+  },
+  {
+    "name": "shift.close",
+    "owner": "billing"
+  },
+  {
+    "name": "shift.close.any",
+    "owner": "billing"
+  },
+  {
+    "name": "day.close",
+    "owner": "billing",
+    "sensitive": true
+  },
+  {
+    "name": "report.view.day",
+    "owner": "billing"
+  },
+  {
+    "name": "report.view.outlet",
+    "owner": "billing"
+  },
+  {
+    "name": "report.export",
+    "owner": "billing"
+  },
+  {
+    "name": "settings.outlet.edit",
+    "owner": "billing"
+  },
+  {
+    "name": "settings.gst_profile.edit",
+    "owner": "billing",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "settings.numbering.edit",
+    "owner": "billing",
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "member.disable_local",
+    "owner": "identity",
+    "sensitive": true
+  },
+  {
+    "name": "audit.read.vendor_access",
+    "owner": "identity"
+  },
+  {
+    "name": "subscription.read",
+    "owner": "tenancy"
+  },
+  {
+    "name": "series.activate",
+    "owner": "tenancy",
+    "sensitive": true
+  },
+  {
+    "name": "device.clock.confirm",
+    "owner": "identity",
+    "sensitive": true
+  },
+  {
+    "name": "series.manual_book.register",
+    "owner": "tenancy",
+    "sensitive": true,
+    "strong_only": true,
+    "owner_grant": true
+  },
+  {
+    "name": "revocation.read",
+    "owner": "identity"
+  },
+  {
+    "name": "device.drain.record",
+    "owner": "identity"
+  },
+  {
+    "name": "proof.verify",
+    "owner": "identity"
+  },
+  {
+    "name": "series.issue",
+    "owner": "tenancy"
+  },
+  {
+    "name": "link.decide",
+    "owner": "tenancy"
+  },
+  {
+    "name": "register.read",
+    "owner": "billing"
+  },
+  {
+    "name": "orders.check_count.read",
+    "owner": "orders"
+  },
+  {
+    "name": "admin.org.read",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.org.create",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.owner_invite.manage",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.registration.verify",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.device.read",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.device.revoke",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.support.session.start",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.audit.read",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.audit.read_own",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.user.manage",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.approval.create",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.approval.read",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.approval.decide",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.signin_code.create",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.signin_code.approve",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.recovery.create",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.recovery.approve",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.subscription.read",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.subscription.start",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.subscription.manage",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.subscription.adjust",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.plan.manage",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.taxrules.manage",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.taxrules.publish",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.org.lifecycle.request",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.org.lifecycle.approve",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.support.session.act",
+    "owner": "admin"
+  },
+  {
+    "name": "admin.report.ledger",
+    "owner": "admin"
+  },
+  {
+    "name": "sync.push",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.drain",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.quarantine.manage",
+    "owner": "sync",
+    "sensitive": true
+  },
+  {
+    "name": "sync.quarantine.read",
+    "owner": "sync",
+    "support_viewable": true
+  },
+  {
+    "name": "sync.quarantine.confirm",
+    "owner": "sync",
+    "support_actable": true
+  },
+  {
+    "name": "sync.exceptions.read",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.register.read",
+    "owner": "sync"
+  },
+  {
+    "name": "sync.emit",
+    "owner": "sync"
+  }
+]

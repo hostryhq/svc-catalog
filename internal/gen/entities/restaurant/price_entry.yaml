@@ -1,0 +1,36 @@
+entity: price_entry
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: uuidv5
+  name: price_entry|{item_id}|{variant_id or "-"}
+description: The price of an item or variant. One row per (item, variant) through a deterministic id, so concurrent
+  first prices converge to one row and concurrent edits are a lww + review conflict.
+fields:
+  item_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: item
+    description: Item.
+  variant_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: item_variant
+    description: Variant; absent for an item without variants.
+  price_paise:
+    type: paise
+    required: true
+    policy: lww_review
+    minimum: 0
+    group: price
+    description: Price in paise, exclusive or inclusive of tax by the outlet price mode.
+detectors:
+- concurrent price edit (review)
+written_by_intents:
+- menu.price.set
+- menu.import.apply

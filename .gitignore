@@ -34,3 +34,8 @@ coverage/
 target/
 src-tauri/target/
 src-tauri/gen/
+
+# Local development (uncommitted workspace, see Makefile)
+.tmp/
+go.work
+go.work.sum

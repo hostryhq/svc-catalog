@@ -1,0 +1,33 @@
+entity: outlet_tax_profile
+entity_v: 1
+owner: billing
+stream: outlet
+policy: lww
+id:
+  rule: uuidv5
+  name: outlet_tax_profile|{outlet_id}|{financial_year}
+description: 'Per outlet and financial year: specified-premises flag and FSSAI number. Edited only in a strong session
+  (online API).'
+fields:
+  financial_year:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 4
+    description: Four digits.
+  specified_premises:
+    type: bool
+    required: true
+    policy: lww_review
+    group: tax
+    description: Selects the higher rate for fnb_standard; never retroactive.
+  fssai_number:
+    type: string
+    required: false
+    policy: lww_review
+    pattern: ^[0-9]{14}$
+    group: tax
+    max_length: 14
+    description: 14 digits.
+written_by_intents:
+- settings.tax_profile.set

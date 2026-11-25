@@ -1,0 +1,24 @@
+entity: floor
+entity_v: 1
+owner: catalog
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A floor section.
+fields:
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 30
+    description: Section name.
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Order.
+written_by_intents:
+- floor.manage

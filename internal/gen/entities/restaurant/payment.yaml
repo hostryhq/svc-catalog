@@ -1,0 +1,81 @@
+entity: payment
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: 'A recorded payment: how the guest paid; never authorised or verified by Hostry. A mixed tender is
+  several payments.'
+fields:
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: Bill paid.
+  target_kind:
+    type: enum
+    values:
+    - bill
+    required: true
+    policy: immutable
+    description: bill in Phase 2; order for advances in Phase 3.
+  tender:
+    type: enum
+    values:
+    - cash
+    - upi
+    - card
+    - other
+    - eco
+    required: true
+    policy: immutable
+    description: Tender kind; on_account is reserved.
+  tender_name:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 30
+    description: Name of an other tender.
+  amount_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Amount applied to the bill.
+  tendered_paise:
+    type: paise
+    required: false
+    policy: immutable
+    minimum: 0
+    description: Cash tendered.
+  change_paise:
+    type: paise
+    required: false
+    policy: immutable
+    minimum: 0
+    description: Change returned.
+  reference:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 40
+    description: UPI reference, or the last 4 digits of a card (never more).
+  shift_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: shift
+    description: Shift.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date the payment was taken on.
+detectors:
+- payments exceed the bill total
+written_by_intents:
+- payment.record
+- bill.finalize

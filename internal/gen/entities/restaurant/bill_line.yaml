@@ -1,0 +1,117 @@
+entity: bill_line
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: A bill line snapshot.
+fields:
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: Bill.
+  line_no:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Position from 1.
+  order_line_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: order_line
+    description: Source order line; absent for a counter sale.
+  item_id:
+    type: id
+    required: true
+    policy: immutable
+    description: Item.
+  item_name:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 80
+    description: Name snapshot.
+  variant_name:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 40
+    description: Variant snapshot.
+  category_id:
+    type: id
+    required: false
+    policy: immutable
+    description: Category snapshot id.
+  category_name:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 60
+    description: Category name snapshot.
+  qty_milli:
+    type: qty_milli
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Quantity.
+  unit_price_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Unit price.
+  modifier_delta_paise:
+    type: paise
+    required: true
+    policy: immutable
+    description: Modifier delta per unit.
+  line_discount_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Line discount.
+  bill_discount_alloc_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Share of the bill-level discount.
+  net_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Value after discounts.
+  comp:
+    type: bool
+    required: true
+    policy: immutable
+    description: Complimentary.
+  comp_value_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: List value of a comp line, for the report.
+  tax_class:
+    type: string
+    required: true
+    policy: immutable
+    description: Tax class snapshot.
+  hsn_sac:
+    type: string
+    required: false
+    policy: immutable
+    max_length: 8
+    description: HSN or SAC snapshot.
+written_by_intents:
+- bill.finalize
+- bill.rebill
+- bill.manual_entry

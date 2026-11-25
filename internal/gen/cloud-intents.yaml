@@ -1,0 +1,229 @@
+# Sync intent registry, gateway (ADR-0002 S4, ADR-0005 section 7 and A2, ADR-0014 R1). Source of truth for the client can() table, the
+# gateway check (ADR-0002 S11) and the hub structural check (S8). Checked by `make lint-intents` (cmd/validate-intents);
+# keys and rules are in sync/intents/README.md. Generated once from a table, edited by hand from here.
+registry: sync-intents
+registry_v: 1
+group: gateway
+description: Cloud-origin intents (the gateway emit API, ADR-0014 A2.2 and A2.3). One intent per online action, owned by the emitting service.
+intents:
+- intent: sync.void
+  intent_v: 1
+  class: control
+  owner: gateway
+  description: The gateway voids a refused configuration op on every node. Origin cloud-<epoch>; one mutation of the protocol
+    record sync_void (svc-sync contract).
+  permission: null
+  permission_reason: Cloud-origin op; sealed by the gateway like any cloud-origin op.
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  - brand
+  - tenant
+  numbering: none
+  entities: {}
+  records:
+  - sync_void
+  idempotency: The record id is stream|origin|seq of the refused op; a replayed void adds the same op to the void set again,
+    which is a no-op.
+- intent: sync.pii.erase
+  intent_v: 1
+  class: control
+  owner: gateway
+  description: "The gateway erases the personal data of one earlier op on every node (security ruling SR-2, O2-8). Origin cloud-<epoch>, sealed like any cloud-origin op; one mutation of the protocol record pii_erase naming the target op. Each node removes the stored values AND salts of the target op from its rows, op log, caches and spool and discards any later arrival of that op's pii; the commitments (body.pii_c) stay in the sealed body. A node acknowledges in the pii_erased field of its next direct cloud hello."
+  permission: null
+  permission_reason: "Cloud-origin op written by the gateway when an authorised erasure is requested online; no device or person records it."
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  - brand
+  - tenant
+  numbering: none
+  entities: {}
+  records:
+  - pii_erase
+  idempotency: "The record id is stream|origin|seq of the target op; erasing twice answers the first erasure op and writes nothing new; applying it again on a node is a no-op."
+- intent: menu.tax_class.set
+  intent_v: 1
+  class: config
+  owner: catalog
+  description: "A strong-session edit of the tax class of an item or a category reaches devices as one op (ADR-0014 A2.3)."
+  permission: null
+  permission_reason: "Authorised online by the owning service before the emit (ADR-0014 A2.3): a strong-only edit has no device intent; the gateway accepts it from cloud origin only."
+  authorised_online_by:
+  - menu.tax_class.edit
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - brand
+  numbering: none
+  entities:
+    item:
+    - set
+    category:
+    - set
+  idempotency: "The emit key is derived from the caller's Idempotency-Key, so a retried edit is one op (ADR-0014 A2.2 item 4); devices apply it like any config op, last writer by (hlc, origin) with review."
+- intent: tax.rule_set.publish
+  intent_v: 1
+  class: config
+  owner: billing
+  description: "A published tax rule set version reaches the tenant stream of every organisation, rule by rule (ADR-0014 A1.4, A2.3)."
+  permission: null
+  permission_reason: "Authorised online by a two-person vendor approval and its grant (ADR-0014 A2.6) before the emit."
+  authorised_online_by:
+  - admin.taxrules.publish
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - tenant
+  numbering: none
+  entities:
+    tax_rule_set:
+    - insert
+    tax_rule:
+    - insert
+  idempotency: "The emit key is the UUIDv5 of tenant and rule-set version, and each rule row id a UUIDv5 of its natural key, so a retried or later-queued emit for an organisation created afterwards is one op."
+- intent: settings.tax_profile.set
+  intent_v: 1
+  class: config
+  owner: billing
+  description: "The verified GST profile of an outlet for a financial year reaches devices (ADR-0014 A2.3)."
+  permission: null
+  permission_reason: "Authorised online by the owning service before the emit (ADR-0014 A2.3): a strong-only edit has no device intent; the gateway accepts it from cloud origin only."
+  authorised_online_by:
+  - settings.gst_profile.edit
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  numbering: none
+  entities:
+    outlet_tax_profile:
+    - insert
+    - set
+    billing_settings:
+    - insert
+    - set
+  idempotency: "The row id is a UUIDv5 of outlet and financial year; the emit key is derived from the caller's Idempotency-Key, so a retried edit is one op. The same op carries price_mode (a field of billing_settings, group tax): a set of price_mode on the outlet's billing_settings row, or an insert of that row (with its defaults) when none exists yet; the intent changes no other billing_settings field."
+- intent: settings.numbering.set
+  intent_v: 1
+  class: config
+  owner: billing
+  description: "The numbering mode of an outlet (number at settle or at present) reaches devices (ADR-0014 A2.3)."
+  permission: null
+  permission_reason: "Authorised online by the owning service before the emit (ADR-0014 A2.3): a strong-only edit has no device intent; the gateway accepts it from cloud origin only."
+  authorised_online_by:
+  - settings.numbering.edit
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  numbering: none
+  entities:
+    billing_settings:
+    - insert
+    - set
+  idempotency: "The row id is a UUIDv5 of the outlet; the emit key is derived from the caller's Idempotency-Key, so a retried edit is one op."
+- intent: settings.discount_limit.set
+  intent_v: 1
+  class: config
+  owner: billing
+  description: "The discount limit of an outlet reaches devices (ADR-0014 A2.3)."
+  permission: null
+  permission_reason: "Authorised online by the owning service before the emit (ADR-0014 A2.3): a strong-only edit has no device intent; the gateway accepts it from cloud origin only."
+  authorised_online_by:
+  - bill.discount.limit.edit
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  numbering: none
+  entities:
+    billing_settings:
+    - insert
+    - set
+  idempotency: "The emit key is derived from the caller's Idempotency-Key, so a retried edit is one op. An outlet whose billing_settings row does not exist yet gets an insert of that row (id UUIDv5 of the outlet, every other field at its default, the limit as given); otherwise a set of discount_limit_bp only."
+- intent: day.revision.record
+  intent_v: 1
+  class: config
+  owner: billing
+  description: "A Z revision for late documents of a closed trading day is delivered to the outlet's devices (ADR-0014 A1.2, A2.3)."
+  permission: null
+  permission_reason: "System emit by billing when the register detects a late document; no user acts (permission_reason)."
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - outlet
+  numbering: none
+  entities:
+    business_day_revision:
+    - insert
+  idempotency: "The emit key is the UUIDv5 of day and revision number, so a retried or restored emit is one op."
+- intent: menu.import.apply
+  intent_v: 1
+  class: config
+  owner: catalog
+  description: A committed CSV menu import reaches devices as ops through the gateway emit API (ADR-0014 R9).
+  permission: null
+  permission_reason: 'Authorised online: createMenuImport and commit need a strong session, or a support act-mode session
+    with the owner''s one-time code.'
+  authorised_online_by:
+  - menu.import
+  - catalog.import
+  proof:
+    kind: session
+  override: false
+  sessions: []
+  device_kinds:
+  - cloud
+  streams:
+  - brand
+  numbering: none
+  entities:
+    category:
+    - insert
+    - set
+    item:
+    - insert
+    - set
+    item_variant:
+    - insert
+    - set
+    price_entry:
+    - insert
+    - set
+  idempotency: Each row op id is a UUIDv5 of (import job, row), so a retried commit emits the same ops; devices apply them
+    like any config op.

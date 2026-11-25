@@ -1,0 +1,46 @@
+entity: receipt_profile
+entity_v: 1
+owner: catalog
+stream: outlet
+policy: lww
+tombstone: true
+id:
+  rule: uuidv5
+  name: receipt_profile|{outlet_id}
+description: 'Printed outlet details and footer. One row per outlet. Legal name and GSTIN come from the tax registration.
+  x-provisional: RM-T2 lists address under the strong GST profile; here it is a normal outlet setting.'
+fields:
+  trade_name:
+    type: string
+    required: false
+    policy: lww
+    max_length: 60
+    description: Name printed above the legal name.
+  address:
+    type: string
+    required: true
+    policy: lww
+    max_length: 200
+    description: Address, up to 3 lines separated by newline.
+  phone:
+    type: string
+    required: false
+    policy: lww
+    max_length: 20
+    description: Outlet phone.
+  footer_text:
+    type: string
+    required: false
+    policy: lww
+    max_length: 120
+    description: Invoice footer.
+  upi_id:
+    type: string
+    required: false
+    policy: lww
+    max_length: 60
+    description: Static UPI id for the footer QR (Should); verifies nothing.
+written_by_intents:
+- settings.outlet.edit
+x-provisional: 'Address edit permission: spec RM-T2 says strong session; modelled as settings.outlet.edit pending
+  a decision.'

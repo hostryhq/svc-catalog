@@ -1,0 +1,36 @@
+entity: modifier
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A modifier option; the price delta may be negative; taxed with its line.
+fields:
+  group_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: modifier_group
+    description: Group.
+  name:
+    type: string
+    required: true
+    policy: lww
+    max_length: 40
+    description: Option name.
+  price_delta_paise:
+    type: paise
+    required: true
+    policy: lww_review
+    group: price
+    description: Signed price delta per unit in paise.
+  sort_order:
+    type: int
+    required: true
+    policy: lww
+    minimum: 0
+    description: Display order.
+written_by_intents:
+- menu.modifier.edit

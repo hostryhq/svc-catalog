@@ -1,0 +1,38 @@
+entity: reason_code
+entity_v: 1
+owner: catalog
+stream: brand
+policy: lww
+tombstone: true
+id:
+  rule: client_uuidv7
+description: A reason code for cancels, discounts, comps, internal closures, refunds, credit notes and changes after
+  a pre-bill.
+fields:
+  purpose:
+    type: enum
+    values:
+    - cancel
+    - discount
+    - comp
+    - internal
+    - refund
+    - credit_note
+    - present_change
+    - cash_move
+    required: true
+    policy: immutable
+    description: What it may be used for.
+  label_key:
+    type: string
+    required: true
+    policy: lww
+    max_length: 60
+    description: i18n key of the label, or the owner's literal text.
+  active:
+    type: bool
+    required: true
+    policy: lww
+    description: Offered on screens.
+written_by_intents:
+- settings.reason.edit

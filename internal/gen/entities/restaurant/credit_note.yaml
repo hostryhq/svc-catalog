@@ -1,0 +1,109 @@
+entity: credit_note
+entity_v: 1
+owner: billing
+stream: outlet
+policy: append
+guarded: true
+id:
+  rule: client_uuidv7
+description: 'A credit note: the only correction of a numbered bill. Cites the original number and date; own series,
+  allocated on the issuing device.'
+fields:
+  number:
+    type: string
+    required: true
+    policy: immutable
+    doc_number: true
+    max_length: 16
+    description: Legal document number <code>/<FY>/<running>; allocated on the device in the finalising transaction
+      (ADR-0002 S7). Never changed or reused; billing never allocates.
+  series_code:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 3
+    description: Series code.
+  bill_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: bill
+    description: Original bill.
+  bill_number:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 16
+    description: Original number.
+  bill_invoice_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Original invoice date.
+  reason_code_id:
+    type: id
+    required: false
+    policy: immutable
+    ref: reason_code
+    description: Reason.
+  rebill_group_id:
+    type: id
+    required: false
+    policy: immutable
+    description: Set when made by a re-bill op.
+  business_date:
+    type: date
+    required: true
+    policy: immutable
+    description: Business date it was made on.
+  invoice_date:
+    type: date
+    required: true
+    policy: immutable
+    description: IST date of issue.
+  financial_year:
+    type: string
+    required: true
+    policy: immutable
+    max_length: 4
+    description: Four digits.
+  calc_v:
+    type: int
+    required: true
+    policy: immutable
+    minimum: 1
+    description: Calculation version.
+  ruleset_id:
+    type: id
+    required: true
+    policy: immutable
+    ref: tax_rule_set
+    description: Rule set used.
+  total_paise:
+    type: paise
+    required: true
+    policy: immutable
+    minimum: 0
+    description: Total.
+  round_off_paise:
+    type: paise
+    required: true
+    policy: immutable
+    description: Signed round-off.
+  refund_tender:
+    type: enum
+    values:
+    - cash
+    - upi
+    - card
+    - other
+    - adjusted
+    required: false
+    policy: immutable
+    description: Tender the money went back by, or adjusted against another bill.
+detectors:
+- tax verification
+- gap in the series register
+written_by_intents:
+- creditnote.issue
+- bill.rebill
